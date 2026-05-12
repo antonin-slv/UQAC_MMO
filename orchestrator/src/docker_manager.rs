@@ -36,9 +36,9 @@ impl DockerManager {
         Ok(manager)
     }
 
-    pub async fn spawn_container(&self, name: &str, image: &str) -> Result<String> {
+    pub async fn spawn_container(&self, name: &str) -> Result<String> {
         let config = Config {
-            image: Some(image),
+            image: Some(env::var("GAME_SERVER_IMAGE").expect("Env GAME_SERVER_IMAGE is not set")),
             tty: Some(true),
             host_config: Some(HostConfig {
                 ..Default::default()

@@ -23,11 +23,11 @@ impl GameServer {
     }
 }
 
-pub struct ServerManager {
+pub struct RedisManager {
     client: redis::Client,
 }
 
-impl ServerManager {
+impl RedisManager {
     pub fn new(url: &str) -> Result<Self> {
         let client = redis::Client::open(url)?;
         Ok(Self { client })
@@ -70,13 +70,9 @@ impl ServerManager {
         let mut servers = Vec::new();
 
         for name in server_names {
-            let key = format!("server:{}", name);
-            let data: Option<String> = con.get(&key).await?;
-
-            if let Some(s) = data {
-                if let Ok(server) = serde_json::from_str(&s) {
-                    servers.push(server);
-                }
+            let server = self.get_server(name).await?;
+            if let Some(server) = server {
+                servers.push(server);
             }
         }
 
@@ -109,6 +105,7 @@ impl ServerManager {
     pub async fn create_server(&self) -> Result<GameServer> {
         let mut con = self.client.get_multiplexed_async_connection().await?;
 
+        // TODO: Lock database to avoid 2 server at same time with same sequence
         let data = con.get("next_server_sequence").await?;
         let next_server_sequence = if let Some(s) = data {
             s.parse().expect("Euh c'est pas un nombre ça Michel")
@@ -130,11 +127,5 @@ impl ServerManager {
         self.update_server(&new_server).await?;
 
         Ok(new_server)
-    }
-
-    pub async fn cleanup(&self) -> Result<()> {
-        let mut con = self.client.get_multiplexed_async_connection().await?;
-        con.flushall().await?;
-        Ok(())
     }
 }
