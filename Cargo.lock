@@ -2713,6 +2713,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "game_client"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bincode",
+ "quinn",
+ "rustls",
+ "serde",
+ "shared_replication",
+ "tokio",
+]
+
+[[package]]
 name = "game_server"
 version = "0.1.0"
 dependencies = [
