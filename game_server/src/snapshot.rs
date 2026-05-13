@@ -1,64 +1,71 @@
 // server/src/snapshot.rs
 use bevy::prelude::*;
-use shared_replication::{EntitySnapshot, PersonalSnapshot, ServerMessage};
-use crate::network::NetworkSender;
-use crate::game::NetworkId;
-
+use bytes::Bytes;
+use shared_replication::{EntitySnapshot, PersonalSnapshot};
+use game_sockets::{GameConnection, GameStream, GameStreamReliability};
+use crate::game::{ControlledBy, Player};
+use crate::network::{NetworkManager, NetworkId};
 const AOI_RADIUS: f32 = 100.0;
 
 pub struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        // On peut même utiliser un "Timer" pour n'envoyer des snapshots que 20 fois par seconde (Tickrate)
-        app.add_systems(Update, broadcast_aoi_snapshots);
+        // todo : mieux controller les moments d'envois de snapshots (actuellement 60 fps -> passer à 20 en tournant entre les clients ?)
+        app.add_systems(PostUpdate, broadcast_aoi_snapshots);
     }
 }
 
 fn broadcast_aoi_snapshots(
-    sender: Res<NetworkSender>,
-    query_players: Query<(&NetworkId, &Transform)>,
+    net: ResMut<NetworkManager>,
+    //todo : Stocker les joueurs dans une hashmap pour éviter le double parcours
+    query_receivers: Query<(&ControlledBy, &Transform), With<Player>>,
+    query_all_entities: Query<(&NetworkId, &Transform)>,
 ) {
-    // --- OPTIMISATION 1 : Pré-calcul des Snapshots ---
-    // On compte le nombre de joueurs pour allouer la mémoire exacte d'un coup (évite les réallocations)
-    let player_count = query_players.iter().count();
-    let mut precomputed_targets = Vec::with_capacity(player_count);
+    let entity_count = query_all_entities.iter().count();
+    if entity_count == 0 { return; }
 
-    // On parcourt tout le monde UNE SEULE FOIS pour générer les DTOs
-    for (net_id, transform) in query_players.iter() {
+    // Pré-calcul de l'état du monde ---
+    let mut precomputed_targets = Vec::with_capacity(entity_count);
+
+    for (net_id, transform) in query_all_entities.iter() {
         let snapshot = EntitySnapshot {
             network_id: net_id.0,
-            position: transform.translation.truncate().to_array(), // retire le z
+            position: transform.translation.truncate().to_array(),
         };
-        // On stocke le snapshot ET la position 3D (pour le calcul de distance qui va suivre)
         precomputed_targets.push((snapshot, transform.translation));
     }
 
-    // --- BOUCLE D'ENVOI ---
-    for (recv_net_id, receiver_transform) in query_players.iter() {
+    let stream = GameStream::new(shared_replication::STREAM_SNAPSHOTS, GameStreamReliability::Unreliable);
+
+    // --- BOUCLE D'ENVOI (Sur les joueurs uniquement) ---
+    for (player_net_id, player_transform) in query_receivers.iter() {
 
         let mut personal_snapshot = PersonalSnapshot {
-            // Optimisation : On alloue la capacité max possible pour éviter que le Vec ne grandisse dynamiquement
-            entities: Vec::with_capacity(player_count)
+            entities: Vec::with_capacity(entity_count)
         };
 
-        // 2. On itère sur notre liste PRÉ-CALCULÉE
+        // On filtre ce qui est autour du joueur
         for (target_snapshot, target_translation) in &precomputed_targets {
+            let distance = player_transform.translation.distance(*target_translation);
 
-            // Calcul de distance mathématique
-            let distance = receiver_transform.translation.distance(*target_translation);
-
-            // 3. Le filtre AOI
             if distance <= AOI_RADIUS {
-                // Copie directe vers le snapshot
                 personal_snapshot.entities.push(*target_snapshot);
             }
         }
 
-        // 4. On sérialise le snapshot final contenant tous les joueurs dans l'AOI
+        // On sérialise et on envoie avec net_lib
         match bincode::serialize(&personal_snapshot) {
             Ok(bytes) => {
-                let _ = sender.0.send(ServerMessage::SendTo(recv_net_id.0, bytes));
+                let data = Bytes::from(bytes);
+
+                // On transforme l'Uuid en GameConnection
+                let conn = GameConnection::from(player_net_id.owner_uuid);
+
+                // Envoi du snapshot !
+                if let Err(e) = net.peer.send(&conn, &stream, data) {
+                    eprintln!("Erreur d'envoi du snapshot à {}: {:?}", player_net_id.owner_uuid, e);
+                }
             }
             Err(e) => eprintln!("Erreur de sérialisation bincode: {}", e),
         }

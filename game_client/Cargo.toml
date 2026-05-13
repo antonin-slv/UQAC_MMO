@@ -5,9 +5,7 @@ edition = "2024"
 
 [dependencies]
 shared_replication = { path = "../shared_replication" }
+game_sockets = { path = "../game_sockets" }
 bevy = "0.18.1"
-quinn = "0.11"
-tokio = { version = "1", features = ["full"] }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
-serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
+bytes = "1.11.1"
