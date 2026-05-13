@@ -7,3 +7,8 @@ members = [
     "orchestrator",
     "shared_replication",
     "game_sockets"]
+
+
+#common dependencies
+[workspace.dependencies]
+dotenv = "0.15"
