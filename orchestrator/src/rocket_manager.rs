@@ -13,7 +13,7 @@ impl RocketManager {
         let rocket = rocket::build()
             .manage(redis_manager) // On injecte les managers dans l'état Rocket
             .manage(docker_manager)
-            .mount("/api", routes![connect, disconnect])
+            .mount("/orchestrator", routes![connect, disconnect])
             .launch()
             .await
             .expect("Rocket failed to launch");
