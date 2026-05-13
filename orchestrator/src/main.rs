@@ -4,44 +4,15 @@ extern crate rocket;
 
 mod docker_manager;
 mod redis_manager;
+mod rocket_manager;
 
 use crate::docker_manager::DockerManager;
 use crate::redis_manager::{GameServer, RedisManager};
+use crate::rocket_manager::RocketManager;
 use anyhow::Result;
 use dotenv::dotenv;
-use rocket::State;
 use std::env;
 use std::sync::Arc;
-
-#[get("/connect")]
-async fn connect(
-    redis: &State<Arc<RedisManager>>,
-    docker_manager: &State<Arc<DockerManager>>,
-) -> String {
-    let game_server = on_client_connected(docker_manager, redis)
-        .await
-        .map_err(|e| e.to_string());
-
-    match game_server {
-        Ok(game_server) => game_server.address,
-        Err(e) => e,
-    }
-}
-
-#[get("/disconnect")]
-async fn disconnect(
-    redis: &State<Arc<RedisManager>>,
-    docker_manager: &State<Arc<DockerManager>>,
-) -> String {
-    let result = on_client_disconnected(docker_manager, redis)
-        .await
-        .map_err(|e| e.to_string());
-
-    match result {
-        Ok(_) => "Disconnected".to_string(),
-        Err(e) => e,
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -56,13 +27,7 @@ async fn main() -> Result<()> {
     let redis_for_rocket = Arc::clone(&redis);
 
     tokio::spawn(async move {
-        rocket::build()
-            .manage(redis_for_rocket) // On injecte les managers dans l'état Rocket
-            .manage(docker_for_rocket)
-            .mount("/api", routes![connect, disconnect])
-            .launch()
-            .await
-            .expect("Rocket failed to launch");
+        RocketManager::new(redis_for_rocket, docker_for_rocket).await;
     });
 
     loop {}
