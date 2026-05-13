@@ -39,15 +39,19 @@ impl DatabaseManager {
         Ok(())
     }
 
-    pub async fn login(&self, username: &str, password: &str) -> Result<bool> {
+    pub async fn login(&self, username: &str, password: &str) -> bool {
         let user =
             sqlx::query_as::<_, UserRow>("SELECT password_hash FROM users WHERE username = $1")
                 .bind(username)
                 .fetch_one(&self.pool)
-                .await?;
+                .await;
 
         let hashed_password = format!("hashed({})", password);
-        Ok(user.password_hash == hashed_password)
+        if let Ok(user) = user {
+            user.password_hash == hashed_password
+        } else {
+            false
+        }
     }
 }
 
