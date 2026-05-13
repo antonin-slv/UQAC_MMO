@@ -2,6 +2,7 @@ use crate::docker_manager::DockerManager;
 use crate::redis_manager::RedisManager;
 use crate::{on_client_connected, on_client_disconnected, update_dashboard};
 use rocket::{Ignite, Rocket, State};
+use std::env;
 use std::sync::Arc;
 
 pub struct RocketManager {
@@ -10,10 +11,16 @@ pub struct RocketManager {
 
 impl RocketManager {
     pub async fn new(redis_manager: Arc<RedisManager>, docker_manager: Arc<DockerManager>) -> Self {
+        let orchestrator_port: u16 = env::var("ORCHESTRATOR_PORT")
+            .expect("Env ORCHESTRATOR_PORT is not set")
+            .parse()
+            .expect("Env ORCHESTRATOR_PORT is not a number ");
+
         let rocket = rocket::build()
             .manage(redis_manager) // On injecte les managers dans l'état Rocket
             .manage(docker_manager)
             .mount("/orchestrator", routes![connect, disconnect])
+            .configure(rocket::Config::figment().merge(("port", orchestrator_port)))
             .launch()
             .await
             .expect("Rocket failed to launch");
