@@ -1,39 +1,36 @@
 extern crate redis;
+#[macro_use]
+extern crate rocket;
+
 mod docker_manager;
 mod redis_manager;
+mod rocket_manager;
 
 use crate::docker_manager::DockerManager;
 use crate::redis_manager::{GameServer, RedisManager};
+use crate::rocket_manager::RocketManager;
 use anyhow::Result;
 use dotenv::dotenv;
 use std::env;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
-    let docker = DockerManager::new().await?;
-    let redis =
-        RedisManager::new(&env::var("REDIS_ADDRESS").expect("Env REDIS_ADDRESS is not set"))?;
+    let docker = Arc::new(DockerManager::new().await?);
+    let redis = Arc::new(RedisManager::new(
+        &env::var("REDIS_ADDRESS").expect("Env REDIS_ADDRESS is not set"),
+    )?);
 
-    // Test connections
-    let num_clients_to_test = 16;
+    let docker_for_rocket = Arc::clone(&docker);
+    let redis_for_rocket = Arc::clone(&redis);
 
-    for _ in 0..num_clients_to_test {
-        on_client_connected(&docker, &redis).await?;
-    }
+    tokio::spawn(async move {
+        RocketManager::new(redis_for_rocket, docker_for_rocket).await;
+    });
 
-    update_dashboard(&redis).await?;
-
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-
-    for _ in 0..num_clients_to_test {
-        on_client_disconnected(&docker, &redis).await?;
-    }
-
-    update_dashboard(&redis).await?;
-
-    Ok(())
+    loop {}
 }
 
 async fn update_dashboard(redis: &RedisManager) -> Result<()> {
