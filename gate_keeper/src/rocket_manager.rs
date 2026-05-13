@@ -123,5 +123,5 @@ async fn get_available_server() -> Result<Json<LoginResponse>, Status> {
         }
     }
 
-    Err(Status::BadRequest)
+    Err(Status::ServiceUnavailable)
 }
