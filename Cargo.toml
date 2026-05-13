@@ -6,5 +6,4 @@ members = [
     "GateKeeper",
     "orchestrator",
     "shared_replication",
-    "game_sockets"
-    "shared_replication"]
+    "game_sockets"]
