@@ -3047,6 +3047,8 @@ dependencies = [
  "dotenv",
  "reqwest",
  "rocket",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
 ]
