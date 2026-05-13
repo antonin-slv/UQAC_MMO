@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "GameServer",
+    "game_client",
+    "game_server",
     "GateKeeper",
-    "orchestrator"]
+    "orchestrator",
+    "shared_replication",
+    "game_sockets"]
