@@ -3,7 +3,7 @@ resolver = "3"
 members = [
     "game_client",
     "game_server",
-    "GateKeeper",
+    "gate_keeper",
     "orchestrator",
     "shared_replication",
     "game_sockets"]
