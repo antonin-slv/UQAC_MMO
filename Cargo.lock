@@ -3009,6 +3009,7 @@ dependencies = [
  "bytes",
  "game_sockets",
  "shared_replication",
+ "uuid",
 ]
 
 [[package]]

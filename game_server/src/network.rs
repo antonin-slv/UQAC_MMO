@@ -124,12 +124,25 @@ impl Plugin for NetworkPlugin {
 
         app.add_message::<PlayerConnected>()
             .add_message::<PlayerDisconnected>()
-            .add_message::<PlayerInputEvent>();
+            .add_message::<PlayerInputEvent>()
+            .add_message::<NetConnexion>()
+            .add_message::<NetDisconnection>();
 
-        app.add_systems(PreUpdate, (orchestrator_bridge_system, network_bridge_system));
+        app.add_systems(PreUpdate, ((orchestrator_bridge_system, network_bridge_system),handle_disconnexions).chain() );
         app.add_systems(Update, send_heartbeat_system);
     }
 }
+
+fn handle_disconnexions(
+    mut msg_net_deconnexion: MessageReader<NetDisconnection>,
+    mut msg_disconnect: MessageWriter<PlayerDisconnected>
+) {
+    for msg in msg_net_deconnexion.read() {
+        println!("Client {} disconnected", msg.client_id);
+        msg_disconnect.write(PlayerDisconnected { client_id: msg.client_id });
+    }
+}
+
 fn orchestrator_bridge_system(
     mut orch: ResMut<OrchestratorManager>
 ) {

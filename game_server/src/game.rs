@@ -68,7 +68,8 @@ fn handle_new_players(
 
         if let Ok(bytes) = bincode::serialize(&welcome) {
             let data = bytes.into();
-            let stream = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Reliable);
+            //todo: make this reliable
+            let stream = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
 
             // 3. Envoi direct au client
             let target = game_sockets::GameConnection {connection_uuid : client_uuid };
