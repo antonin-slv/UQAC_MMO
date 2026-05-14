@@ -90,19 +90,9 @@ impl RedisManager {
         Ok(servers)
     }
 
-    pub async fn get_available_server(&self) -> Result<Option<GameServer>> {
-        let servers = self.get_available_servers().await?;
-
-        if let Some(server) = servers.first() {
-            return Ok(Some(server.clone()));
-        }
-
-        Ok(None)
-    }
-
     pub async fn remove_server(&self, id: &String) -> Result<()> {
         let mut con = self.conn.clone();
-        
+
         con.hdel("server", id).await?;
 
         Ok(())

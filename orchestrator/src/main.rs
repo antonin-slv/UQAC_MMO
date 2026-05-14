@@ -10,6 +10,7 @@ use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer};
 use serde::{Deserialize, Serialize};
+use shared_replication::STREAM_HEARTBEAT;
 use std::env;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -24,6 +25,7 @@ pub struct Heartbeat {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    println!("Starting Orchestrator");
     dotenv().ok();
 
     let docker = DockerManager::new().await?;
@@ -31,15 +33,32 @@ async fn main() -> Result<()> {
 
     let mut peer = GamePeer::new(QuicBackend::new());
 
+    let orchestrator_address =
+        env::var("ORCH_ADDRESS").expect("Env ORCHESTRATOR_ADDRESS is not set");
+    let orchestrator_port: u16 = env::var("ORCH_PORT")
+        .expect("Env ORCH_PORT is not set")
+        .parse()
+        .expect("Env ORCH_PORT is not a number");
+    peer.listen(&orchestrator_address, orchestrator_port)
+        .expect("Cannot create socket");
+
+    println!(
+        "Orchestrator listening on {}:{}",
+        orchestrator_address, orchestrator_port
+    );
+
     loop {
         while let Ok(Some(event)) = peer.poll() {
             match event {
+                GameNetworkEvent::Connected(connection) => {
+                    println!("Feur : {:?}", connection)
+                }
                 GameNetworkEvent::Message {
                     connection,
                     stream,
                     data,
                 } => match stream.real_stream_id() {
-                    1 => match serde_json::from_slice::<Heartbeat>(&data) {
+                    STREAM_HEARTBEAT => match serde_json::from_slice::<Heartbeat>(&data) {
                         Ok(heartbeat) => on_heartbeat_received(&redis, &docker, heartbeat).await?,
                         Err(e) => {
                             eprintln!("Invalid heartbeat {} : {}", connection.connection_uuid, e)
