@@ -1,21 +1,16 @@
 extern crate redis;
-#[macro_use]
-extern crate rocket;
 
 mod docker_manager;
 mod redis_manager;
-mod rocket_manager;
 
 use crate::docker_manager::DockerManager;
 use crate::redis_manager::{GameServer, RedisManager};
-use crate::rocket_manager::RocketManager;
 use anyhow::Result;
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Heartbeat {
@@ -31,15 +26,8 @@ pub struct Heartbeat {
 async fn main() -> Result<()> {
     dotenv().ok();
 
-    let docker = Arc::new(DockerManager::new().await?);
-    let redis = Arc::new(RedisManager::new().await?);
-
-    let redis_for_rocket = Arc::clone(&redis);
-    let docker_for_rocket = Arc::clone(&docker);
-
-    tokio::spawn(async move {
-        RocketManager::new(redis_for_rocket, docker_for_rocket).await;
-    });
+    let docker = DockerManager::new().await?;
+    let redis = RedisManager::new().await?;
 
     let mut peer = GamePeer::new(QuicBackend::new());
 
@@ -70,25 +58,10 @@ async fn main() -> Result<()> {
 
         let mut available_server = redis.get_available_servers().await?;
 
-        println!("Available servers: {:?}", available_server.len());
-
         while available_server.len() < hot_servers_min as usize {
             available_server.push(spawn_server(&docker, &redis).await?);
         }
     }
-}
-
-async fn update_dashboard(redis: &RedisManager) -> Result<()> {
-    let servers = redis.get_all_servers().await?;
-    println!("Liste des serveurs actifs :");
-    for s in servers {
-        println!(
-            " - {} ({}) : {}/{} joueurs",
-            s.id, s.address, s.players_online, s.players_max
-        );
-    }
-
-    Ok(())
 }
 
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
