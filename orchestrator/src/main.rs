@@ -9,23 +9,11 @@ use anyhow::Result;
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer};
-use serde::{Deserialize, Serialize};
-use shared_replication::STREAM_HEARTBEAT;
+use shared_replication::{Heartbeat, STREAM_HEARTBEAT};
 use std::env;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Heartbeat {
-    pub id: String,
-    pub ip: String,
-    pub port: u16,
-    pub zone: String,
-    pub player_count: usize,
-    pub max_players: usize,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("Starting Orchestrator");
     dotenv().ok();
 
     let docker = DockerManager::new().await?;
