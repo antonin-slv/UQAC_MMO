@@ -4913,11 +4913,13 @@ dependencies = [
  "bollard",
  "dotenv",
  "futures-util",
+ "game_sockets",
  "redis",
  "rocket",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
  "winapi",
 ]
 

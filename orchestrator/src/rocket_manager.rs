@@ -1,6 +1,7 @@
 use crate::docker_manager::DockerManager;
 use crate::redis_manager::RedisManager;
-use crate::{on_client_connected, on_client_disconnected, update_dashboard};
+use crate::update_dashboard;
+use rocket::http::Status;
 use rocket::{Ignite, Rocket, State};
 use std::env;
 use std::sync::Arc;
@@ -11,15 +12,15 @@ pub struct RocketManager {
 
 impl RocketManager {
     pub async fn new(redis_manager: Arc<RedisManager>, docker_manager: Arc<DockerManager>) -> Self {
-        let orchestrator_port: u16 = env::var("ORCHESTRATOR_PORT")
-            .expect("Env ORCHESTRATOR_PORT is not set")
+        let orchestrator_port: u16 = env::var("ORCH_PORT")
+            .expect("Env ORCH_PORT is not set")
             .parse()
-            .expect("Env ORCHESTRATOR_PORT is not a number ");
+            .expect("Env ORCH_PORT is not a number ");
 
         let rocket = rocket::build()
-            .manage(redis_manager) // On injecte les managers dans l'état Rocket
+            .manage(redis_manager)
             .manage(docker_manager)
-            .mount("/orchestrator", routes![connect, disconnect])
+            .mount("/orchestrator", routes![connect, clear_servers])
             .configure(rocket::Config::figment().merge(("port", orchestrator_port)))
             .launch()
             .await
@@ -29,35 +30,46 @@ impl RocketManager {
 }
 
 #[get("/connect")]
-async fn connect(
-    redis: &State<Arc<RedisManager>>,
-    docker_manager: &State<Arc<DockerManager>>,
-) -> String {
-    let game_server = on_client_connected(docker_manager, redis)
+async fn connect(redis: &State<Arc<RedisManager>>) -> Result<String, Status> {
+    let game_server = redis
+        .get_available_server()
         .await
         .map_err(|e| e.to_string());
 
     update_dashboard(redis).await.expect("TODO: panic message");
 
     match game_server {
-        Ok(game_server) => game_server.address,
-        Err(e) => e,
+        Ok(game_server) => {
+            if let Some(mut game_server) = game_server {
+                game_server.players_online += 1;
+
+                let _ = redis.update_server(&game_server).await;
+
+                Ok(game_server.address)
+            } else {
+                Err(Status::ServiceUnavailable)
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            Err(Status::ServiceUnavailable)
+        }
     }
 }
 
-#[get("/disconnect")]
-async fn disconnect(
+#[get("/clear-servers")]
+async fn clear_servers(
     redis: &State<Arc<RedisManager>>,
-    docker_manager: &State<Arc<DockerManager>>,
-) -> String {
-    let result = on_client_disconnected(docker_manager, redis)
-        .await
-        .map_err(|e| e.to_string());
+    docker: &State<Arc<DockerManager>>,
+) -> Result<String, Status> {
+    let servers = redis.get_all_servers().await;
 
-    update_dashboard(redis).await.expect("TODO: panic message");
-
-    match result {
-        Ok(_) => "Disconnected".to_string(),
-        Err(e) => e,
+    if let Ok(servers) = servers {
+        for server in servers {
+            let _ = docker.terminate_container(&server.id).await;
+            let _ = redis.remove_server(&server.id).await;
+        }
     }
+
+    Ok("C'est delete".to_string())
 }
