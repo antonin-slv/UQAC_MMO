@@ -36,7 +36,7 @@ impl DockerManager {
         Ok(manager)
     }
 
-    pub async fn spawn_container(&self, name: &str) -> Result<String> {
+    pub async fn spawn_container(&self, id: &String) -> Result<String> {
         let config = Config {
             image: Some(env::var("GAME_SERVER_IMAGE").expect("Env GAME_SERVER_IMAGE is not set")),
             tty: Some(true),
@@ -46,10 +46,12 @@ impl DockerManager {
             ..Default::default()
         };
 
+        let name = format!("server-{}", id);
+
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name,
+                    name: name.clone(),
                     platform: None,
                 }),
                 config,
@@ -57,12 +59,12 @@ impl DockerManager {
             .await?;
 
         self.docker
-            .start_container(name, None::<StartContainerOptions<String>>)
+            .start_container(name.as_str(), None::<StartContainerOptions<String>>)
             .await?;
 
         let container_data = self
             .docker
-            .inspect_container(name, None::<InspectContainerOptions>)
+            .inspect_container(name.as_str(), None::<InspectContainerOptions>)
             .await?;
 
         let server_ip = container_data
@@ -78,12 +80,16 @@ impl DockerManager {
         Ok(server_ip.expect("Feur"))
     }
 
-    pub async fn terminate_container(&self, name: &str) -> Result<()> {
+    pub async fn terminate_container(&self, id: &String) -> Result<()> {
         let stop_options = StopContainerOptions { t: 10 };
 
-        self.docker.stop_container(name, Some(stop_options)).await?;
+        let name = format!("server-{}", id);
 
-        self.docker.remove_container(name, None).await?;
+        self.docker
+            .stop_container(name.as_str(), Some(stop_options))
+            .await?;
+
+        self.docker.remove_container(name.as_str(), None).await?;
 
         Ok(())
     }
