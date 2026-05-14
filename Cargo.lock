@@ -3009,6 +3009,7 @@ dependencies = [
  "bytes",
  "game_sockets",
  "shared_replication",
+ "uuid",
 ]
 
 [[package]]
@@ -3018,7 +3019,9 @@ dependencies = [
  "bevy",
  "bincode",
  "bytes",
+ "dotenv",
  "game_sockets",
+ "serde_json",
  "shared_replication",
  "uuid",
 ]
