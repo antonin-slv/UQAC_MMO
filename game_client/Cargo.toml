@@ -9,3 +9,4 @@ game_sockets = { path = "../game_sockets" }
 bevy = "0.18.1"
 bincode = "1.3"
 bytes = "1.11.1"
+uuid = { version = "1", features = ["v4"] }
