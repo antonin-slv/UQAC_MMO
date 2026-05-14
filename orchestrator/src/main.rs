@@ -38,9 +38,6 @@ async fn main() -> Result<()> {
     loop {
         while let Ok(Some(event)) = peer.poll() {
             match event {
-                GameNetworkEvent::Connected(connection) => {
-                    println!("Feur : {:?}", connection)
-                }
                 GameNetworkEvent::Message {
                     connection,
                     stream,
