@@ -93,11 +93,11 @@ async fn health() -> content::RawJson<&'static str> {
 
 async fn get_available_server() -> Result<Json<LoginResponse>, Status> {
     let orchestrator_address =
-        &env::var("ORCHESTRATOR_ADDRESS").expect("Env ORCHESTRATOR_ADDRESS is not set");
-    let gatekeeper_port: u16 = env::var("ORCHESTRATOR_PORT")
-        .expect("Env ORCHESTRATOR_PORT is not set")
+        &env::var("ORCH_ADDRESS").expect("Env ORCH_ADDRESS is not set");
+    let gatekeeper_port: u16 = env::var("ORCH_PORT")
+        .expect("Env ORCH_PORT is not set")
         .parse()
-        .expect("Env ORCHESTRATOR_PORT is not a valid number");
+        .expect("Env ORCH_PORT is not a valid number");
 
     let orchestrator_address = format!(
         "http://{}:{}/orchestrator",
