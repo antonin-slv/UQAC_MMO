@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const STREAM_HANDSHAKE: u16 = 0;
 pub const STREAM_SNAPSHOTS: u16 = 1;
 pub const STREAM_INPUTS: u16    = 2;
+pub const STREAM_HEARTBEAT: u16 = 3;
 
 
 //
