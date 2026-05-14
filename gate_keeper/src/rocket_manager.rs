@@ -92,7 +92,7 @@ async fn health() -> content::RawJson<&'static str> {
 }
 
 async fn get_available_server() -> Result<Json<LoginResponse>, Status> {
-    let gatekeeper_address =
+    let orchestrator_address =
         &env::var("ORCH_ADDRESS").expect("Env ORCH_ADDRESS is not set");
     let gatekeeper_port: u16 = env::var("ORCH_PORT")
         .expect("Env ORCH_PORT is not set")
@@ -101,7 +101,7 @@ async fn get_available_server() -> Result<Json<LoginResponse>, Status> {
 
     let orchestrator_address = format!(
         "http://{}:{}/orchestrator",
-        gatekeeper_address, gatekeeper_port
+        orchestrator_address, gatekeeper_port
     );
     let response = reqwest::get(format!("{}/connect", orchestrator_address)).await;
 
