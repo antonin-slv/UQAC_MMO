@@ -11,15 +11,16 @@ use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer};
 use shared_replication::{Heartbeat, STREAM_HEARTBEAT};
 use std::env;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::interval;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
-    let docker = DockerManager::new().await?;
-    let redis = RedisManager::new().await?;
-
-    let mut peer = GamePeer::new(QuicBackend::new());
+    let docker = Arc::new(DockerManager::new().await?);
+    let redis = Arc::new(RedisManager::new().await?);
 
     let orchestrator_address =
         env::var("ORCH_ADDRESS").expect("Env ORCHESTRATOR_ADDRESS is not set");
@@ -27,45 +28,61 @@ async fn main() -> Result<()> {
         .expect("Env ORCH_PORT is not set")
         .parse()
         .expect("Env ORCH_PORT is not a number");
-    peer.listen(&orchestrator_address, orchestrator_port)
-        .expect("Cannot create socket");
 
     println!(
         "Orchestrator listening on {}:{}",
         orchestrator_address, orchestrator_port
     );
 
-    loop {
-        while let Ok(Some(event)) = peer.poll() {
-            match event {
-                GameNetworkEvent::Message {
-                    connection,
-                    stream,
-                    data,
-                } => match stream.real_stream_id() {
-                    STREAM_HEARTBEAT => match serde_json::from_slice::<Heartbeat>(&data) {
-                        Ok(heartbeat) => on_heartbeat_received(&redis, &docker, heartbeat).await?,
-                        Err(e) => {
-                            eprintln!("Invalid heartbeat {} : {}", connection.connection_uuid, e)
-                        }
-                    },
-                    _ => {}
-                },
-                _ => {}
+    let hot_servers_min: u16 = env::var("HOT_SERVERS_MIN")
+        .expect("Env HOT_SERVERS_MIN is not set")
+        .parse()
+        .expect("Env HOT_SERVERS_MIN is not an integer");
+
+    let redis_heartbeat = Arc::clone(&redis);
+    let docker_heartbeat = Arc::clone(&docker);
+
+    let heartbeat_handle = tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_secs(3));
+
+        let mut peer = GamePeer::new(QuicBackend::new());
+
+        peer.listen(&orchestrator_address, orchestrator_port)
+            .expect("Cannot create socket");
+
+        loop {
+            ticker.tick().await;
+
+            if let Err(e) = listen_heartbeat(&mut peer, &redis_heartbeat, &docker_heartbeat).await {
+                println!("orchestrator error: {}", e);
             }
         }
+    });
 
-        let hot_servers_min: u16 = env::var("HOT_SERVERS_MIN")
-            .expect("Env HOT_SERVERS_MIN is not set")
-            .parse()
-            .expect("Env HOT_SERVERS_MIN is not an integer");
+    let redis_scaler = Arc::clone(&redis);
+    let docker_scaler = Arc::clone(&docker);
 
-        let mut available_server = redis.get_available_servers().await?;
+    let scaler_handle = tokio::spawn(async move {
+        let mut ticker = interval(Duration::from_secs(1));
 
-        while available_server.len() < hot_servers_min as usize {
-            available_server.push(spawn_server(&docker, &redis).await?);
+        loop {
+            ticker.tick().await;
+
+            let available_server = redis.get_available_servers().await;
+
+            if let Ok(mut available_server) = available_server {
+                while available_server.len() < hot_servers_min as usize {
+                    if let Ok(spawned_server) = spawn_server(&docker_scaler, &redis_scaler).await {
+                        available_server.push(spawned_server);
+                    }
+                }
+            }
         }
-    }
+    });
+
+    tokio::try_join!(heartbeat_handle, scaler_handle)?;
+
+    Ok(())
 }
 
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
@@ -75,6 +92,33 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
     server.address = ip_address;
 
     Ok(server)
+}
+
+async fn listen_heartbeat(
+    peer: &mut GamePeer,
+    redis: &RedisManager,
+    docker: &DockerManager,
+) -> Result<()> {
+    while let Ok(Some(event)) = peer.poll() {
+        match event {
+            GameNetworkEvent::Message {
+                connection,
+                stream,
+                data,
+            } => match stream.real_stream_id() {
+                STREAM_HEARTBEAT => match serde_json::from_slice::<Heartbeat>(&data) {
+                    Ok(heartbeat) => on_heartbeat_received(&redis, &docker, heartbeat).await?,
+                    Err(e) => {
+                        eprintln!("Invalid heartbeat {} : {}", connection.connection_uuid, e)
+                    }
+                },
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
 async fn on_heartbeat_received(
