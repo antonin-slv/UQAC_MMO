@@ -7,5 +7,5 @@
 .idea/
 *.rs.bk
 
-Dockerfile
+game_server/Dockerfile
 *.Dockerfile

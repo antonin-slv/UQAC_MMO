@@ -19,25 +19,24 @@ use tokio::time::interval;
 async fn main() -> Result<()> {
     dotenv().ok();
 
+    println!("Starting Orchestrator");
+    println!("Starting docker");
+
     let docker = Arc::new(DockerManager::new().await?);
+    println!("Starting redis");
     let redis = Arc::new(RedisManager::new().await?);
 
-    let orchestrator_address =
-        env::var("ORCH_ADDRESS").expect("Env ORCHESTRATOR_ADDRESS is not set");
     let orchestrator_port: u16 = env::var("ORCH_PORT")
         .expect("Env ORCH_PORT is not set")
         .parse()
         .expect("Env ORCH_PORT is not a number");
 
-    println!(
-        "Orchestrator listening on {}:{}",
-        orchestrator_address, orchestrator_port
-    );
-
     let hot_servers_min: u16 = env::var("HOT_SERVERS_MIN")
         .expect("Env HOT_SERVERS_MIN is not set")
         .parse()
         .expect("Env HOT_SERVERS_MIN is not an integer");
+
+    println!("Start tasks");
 
     let redis_heartbeat = Arc::clone(&redis);
     let docker_heartbeat = Arc::clone(&docker);
@@ -47,8 +46,10 @@ async fn main() -> Result<()> {
 
         let mut peer = GamePeer::new(QuicBackend::new());
 
-        peer.listen(&orchestrator_address, orchestrator_port)
+        peer.listen(&"0.0.0.0", orchestrator_port)
             .expect("Cannot create socket");
+
+        println!("Orchestrator listening to 0.0.0.0:{}", orchestrator_port);
 
         loop {
             ticker.tick().await;
@@ -71,9 +72,13 @@ async fn main() -> Result<()> {
             let available_server = redis.get_available_servers().await;
 
             if let Ok(mut available_server) = available_server {
+                println!("{} / {}", available_server.len(), hot_servers_min);
                 while available_server.len() < hot_servers_min as usize {
-                    if let Ok(spawned_server) = spawn_server(&docker_scaler, &redis_scaler).await {
-                        available_server.push(spawned_server);
+                    match spawn_server(&docker_scaler, &redis_scaler).await {
+                        Ok(spawned_server) => available_server.push(spawned_server),
+                        Err(e) => {
+                            eprintln!("{e}")
+                        }
                     }
                 }
             }
@@ -89,6 +94,7 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
     let mut server = redis.create_server().await?;
 
     let ip_address = docker.spawn_container(&server.id).await?;
+
     server.address = ip_address;
 
     Ok(server)
@@ -129,8 +135,8 @@ async fn on_heartbeat_received(
     let server = redis.get_server(heartbeat.id).await?;
     if let Some(mut server) = server {
         if heartbeat.player_count == 0 {
-            docker.terminate_container(&server.id).await?;
-            redis.remove_server(&server.id).await?;
+            //docker.terminate_container(&server.id).await?;
+            //redis.remove_server(&server.id).await?;
         } else {
             server.players_online = heartbeat.player_count as u32;
             redis.update_server(&server).await?;

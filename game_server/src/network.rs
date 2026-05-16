@@ -20,6 +20,7 @@ const EXT_PORT_ENV_NAME: &str = "SERVER_EXT_PORT";
 const ORCH_URL_ENV_NAME: &str = "ORCHESTRATOR_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
+const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
 
 #[derive(Resource)]
 pub struct NetworkManager {
@@ -91,7 +92,6 @@ impl Plugin for NetworkPlugin {
         // --- ce à quoi les clients se connectent
         let external_ip: String = env::var(EXT_IP_ENV_NAME).unwrap_or_else(|_| {
             panic!("Error: {} environment variable not set", EXT_IP_ENV_NAME);
-            "127.0.0.1".to_string()
         });
 
         let external_port = env::var(EXT_PORT_ENV_NAME);
@@ -99,11 +99,21 @@ impl Plugin for NetworkPlugin {
         let external_port = match external_port {
             Ok(port_str) => port_str.parse::<u16>().unwrap_or_else(|_| {
                 panic!("Error : {} must be a valid u16", EXT_PORT_ENV_NAME);
-                5000
             }),
             Err(_) => {
                 panic!("Error : {} must be set", EXT_PORT_ENV_NAME);
-                5000
+            }
+        };
+        println!("[Server] External URL : {}:{}", external_ip, external_port);
+
+        let max_players = env::var(MAX_PLAYER_PER_SERVER);
+
+        let max_players = match max_players {
+            Ok(port_str) => port_str.parse::<usize>().unwrap_or_else(|_| {
+                panic!("Error : {} must be a valid u16", MAX_PLAYER_PER_SERVER);
+            }),
+            Err(_) => {
+                panic!("Error : {} must be set", MAX_PLAYER_PER_SERVER);
             }
         };
         println!("[Server] External URL : {}:{}", external_ip, external_port);
@@ -183,7 +193,7 @@ impl Plugin for NetworkPlugin {
                 ServerStats {
                     zone: "default".to_string(),
                     total_players: 0,
-                    max_players: 100,
+                    max_players,
                     external_url: external_ip,
                     external_port,
                     uuid: server_uuid,
@@ -259,9 +269,9 @@ fn send_heartbeat_system(
         if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
             let data = Bytes::from(json_bytes);
 
-            let useless_stream = GameStream::new(shared_replication::STREAM_HEARTBEAT, GameStreamReliability::Unreliable);
+            let heartbeat_stream = GameStream::new(shared_replication::STREAM_HEARTBEAT, GameStreamReliability::Unreliable);
 
-            if let Err(e) = orch.peer.send(conn, &useless_stream, data) {
+            if let Err(e) = orch.peer.send(conn, &heartbeat_stream, data) {
                 eprintln!("[Server] Erreur d'envoi du heartbeat: {:?}", e);
             } else {
                 println!(

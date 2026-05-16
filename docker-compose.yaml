@@ -1,8 +1,20 @@
+networks:
+  mmo_network:
+    driver: bridge
+    name: mmo_network
+
 services:
+  game_server:
+    build:
+      context: .
+      dockerfile: game_server/Dockerfile
+    image: game-server
+    
+
   # Service de base de données PostgreSQL
   db:
     image: postgres:15-alpine
-    container_name: postgres_db
+    container_name: postgres
     restart: always
     env_file:
       - .env
@@ -10,16 +22,39 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mmo_network
 
   # Service de cache Redis
   redis:
     image: redis:7-alpine
-    container_name: redis_cache
+    container_name: redis
     restart: always
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - mmo_network
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    image: orchestrator
+    env_file:
+      - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "3631:3631"
+    depends_on:
+      - redis
+      - game_server
+    restart: always
+    container_name: orchestrator
+    networks:
+      - mmo_network
 
 volumes:
   postgres_data:

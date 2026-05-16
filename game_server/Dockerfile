@@ -2,7 +2,7 @@
 
 WORKDIR /usr/src/app
 
-COPY . .
+COPY .. .
 
 RUN cargo build --release -p game_server
 
