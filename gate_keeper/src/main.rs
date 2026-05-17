@@ -12,9 +12,12 @@ use std::sync::Arc;
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
 
+    println!("Starting gatekeeper server...");
+    println!("Connecting to database server...");
     let database_manager = Arc::new(DatabaseManager::new().await?);
 
     tokio::spawn(async move {
+        println!("Start rocket");
         RocketManager::new(database_manager).await;
     });
 

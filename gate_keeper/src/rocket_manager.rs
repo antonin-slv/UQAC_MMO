@@ -1,6 +1,6 @@
 use crate::database_manager::DatabaseManager;
 use rocket::http::Status;
-use rocket::response::{content, status};
+use rocket::response::content;
 use rocket::serde::{Deserialize, json::Json};
 use rocket::{Ignite, Rocket, State};
 use serde::Serialize;
@@ -92,8 +92,7 @@ async fn health() -> content::RawJson<&'static str> {
 }
 
 async fn get_available_server() -> Result<Json<LoginResponse>, Status> {
-    let orchestrator_address =
-        &env::var("ORCH_ADDRESS").expect("Env ORCH_ADDRESS is not set");
+    let orchestrator_address = &env::var("ORCH_ADDRESS").expect("Env ORCH_ADDRESS is not set");
     let gatekeeper_port: u16 = env::var("ORCH_PORT")
         .expect("Env ORCH_PORT is not set")
         .parse()
