@@ -9,20 +9,18 @@ pub struct DatabaseManager {
 
 impl DatabaseManager {
     pub async fn new() -> Result<DatabaseManager> {
+        let host = &env::var("POSTGRES_HOST").expect("Env POSTGRES_HOST is not set");
         let username = &env::var("POSTGRES_USER").expect("Env POSTGRES_USER is not set");
         let password = &env::var("POSTGRES_PASSWORD").expect("Env POSTGRES_PASSWORD is not set");
         let database = &env::var("POSTGRES_DB").expect("Env POSTGRES_DB is not set");
 
-        let database_url = format!(
-            "postgres://{}:{}@localhost/{}",
-            username, password, database
-        );
+        let database_url = format!("postgres://{}:{}@{}/{}", username, password, host, database);
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(database_url.as_str())
             .await?;
 
-        sqlx::migrate!(".\\migrations").run(&pool).await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(DatabaseManager { pool })
     }
 
