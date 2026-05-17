@@ -72,8 +72,8 @@ async fn main() -> Result<()> {
             let available_server = redis.get_available_servers().await;
 
             if let Ok(mut available_server) = available_server {
-                println!("{} / {}", available_server.len(), hot_servers_min);
                 while available_server.len() < hot_servers_min as usize {
+                    println!("Spawn new server");
                     match spawn_server(&docker_scaler, &redis_scaler).await {
                         Ok(spawned_server) => available_server.push(spawned_server),
                         Err(e) => {
@@ -135,12 +135,20 @@ async fn on_heartbeat_received(
     let server = redis.get_server(heartbeat.id).await?;
     if let Some(mut server) = server {
         if heartbeat.player_count == 0 {
-            //docker.terminate_container(&server.id).await?;
-            //redis.remove_server(&server.id).await?;
-        } else {
-            server.players_online = heartbeat.player_count as u32;
-            redis.update_server(&server).await?;
+            let hot_servers_min: u16 = env::var("HOT_SERVERS_MIN")
+                .expect("Env HOT_SERVERS_MIN is not set")
+                .parse()
+                .expect("Env HOT_SERVERS_MIN is not an integer");
+
+            let available_server = redis.get_available_servers().await?;
+
+            if available_server.len() > hot_servers_min as usize {
+                docker.terminate_container(&server.id).await?;
+                redis.remove_server(&server.id).await?;
+            }
         }
+        server.players_online = heartbeat.player_count as u32;
+        redis.update_server(&server).await?;
     } else {
         eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là")
     }
