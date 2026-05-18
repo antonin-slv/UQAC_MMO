@@ -3051,7 +3051,7 @@ dependencies = [
  "reqwest",
  "rocket",
  "serde",
- "serde_json",
+ "shared_replication",
  "sqlx",
  "tokio",
 ]
@@ -6270,7 +6270,11 @@ dependencies = [
 name = "shared_replication"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "redis",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
