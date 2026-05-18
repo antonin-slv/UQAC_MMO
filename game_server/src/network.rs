@@ -10,12 +10,10 @@ use events::{
 };
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
-use shared_replication::{Heartbeat, NetMessages, PlayerInput, STREAM_HANDSHAKE, STREAM_INPUTS};
+use shared_replication::{Heartbeat, NetMessages, PlayerInput, ServerInfo, STREAM_HANDSHAKE, STREAM_INPUTS};
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
 const INNER_PORT_ENV_NAME: &str = "SERVER_LISTEN_PORT";
-const EXT_IP_ENV_NAME: &str = "SERVER_EXT_IP";
-const EXT_PORT_ENV_NAME: &str = "SERVER_EXT_PORT";
 
 const ORCH_URL_ENV_NAME: &str = "ORCHESTRATOR_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
@@ -69,7 +67,6 @@ pub struct NetworkPlugin;
 
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
-
         println!("\n[Server] Initializing NetworkPlugin\n");
 
         // --- ce que le serveur écoute
@@ -89,23 +86,6 @@ impl Plugin for NetworkPlugin {
             });
         println!("[Server] local listen {}:{}", listen_ip, listen_port);
 
-        // --- ce à quoi les clients se connectent
-        let external_ip: String = env::var(EXT_IP_ENV_NAME).unwrap_or_else(|_| {
-            panic!("Error: {} environment variable not set", EXT_IP_ENV_NAME);
-        });
-
-        let external_port = env::var(EXT_PORT_ENV_NAME);
-
-        let external_port = match external_port {
-            Ok(port_str) => port_str.parse::<u16>().unwrap_or_else(|_| {
-                panic!("Error : {} must be a valid u16", EXT_PORT_ENV_NAME);
-            }),
-            Err(_) => {
-                panic!("Error : {} must be set", EXT_PORT_ENV_NAME);
-            }
-        };
-        println!("[Server] External URL : {}:{}", external_ip, external_port);
-
         let max_players = env::var(MAX_PLAYER_PER_SERVER);
 
         let max_players = match max_players {
@@ -116,7 +96,8 @@ impl Plugin for NetworkPlugin {
                 panic!("Error : {} must be set", MAX_PLAYER_PER_SERVER);
             }
         };
-        println!("[Server] External URL : {}:{}", external_ip, external_port);
+        println!("[Server] MAX PLAYERS : {}", max_players);
+
 
         let heartbeat_interval = env::var(HEARTBEAT_RATE_ENV_NAME);
 
@@ -138,12 +119,15 @@ impl Plugin for NetworkPlugin {
         // retrieving the uuid
         let server_uuid = env::var(SELF_UUID_ENV_NAME);
         let server_uuid = match server_uuid {
-            Ok(server_uuid) => match(uuid::Uuid::try_parse(&server_uuid)) {
+            Ok(server_uuid) => match (uuid::Uuid::try_parse(&server_uuid)) {
                 Ok(uuid) => uuid,
                 Err(E) => {
-                    panic!("Error : {} has error : {}\n\twith : {}", SELF_UUID_ENV_NAME,E, server_uuid);
+                    panic!(
+                        "Error : {} has error : {}\n\twith : {}",
+                        SELF_UUID_ENV_NAME, E, server_uuid
+                    );
                 }
-            }
+            },
             Err(_) => {
                 panic!("Error : {} must be set.", SELF_UUID_ENV_NAME);
             }
@@ -194,8 +178,8 @@ impl Plugin for NetworkPlugin {
                     zone: "default".to_string(),
                     total_players: 0,
                     max_players,
-                    external_url: external_ip,
-                    external_port,
+                    external_url: "".to_string(),
+                    external_port: 0,
                     uuid: server_uuid,
                 },
             );
@@ -232,14 +216,51 @@ fn handle_disconnexions(
     }
 }
 
-fn orchestrator_bridge_system(mut orch: ResMut<OrchestratorManager>) {
+fn orchestrator_bridge_system(
+    mut orch: ResMut<OrchestratorManager>,
+    mut self_stats : ResMut<ServerStats>,
+) {
     while let Ok(Some(event)) = orch.peer.poll() {
-        if let GameNetworkEvent::Connected(conn) = event {
-            println!(
-                "[Server] Connexion Quik établie avec l'Orchestrateur ! (ID interne: {})",
-                conn.connection_uuid
-            );
-            orch.connection = Some(conn);
+        match event {
+            GameNetworkEvent::Connected(conn) => {
+                println!("[Orchestrator] Connected to orchestrator");
+                orch.connection = Some(conn);
+            }
+            GameNetworkEvent::Message {
+                stream,
+                connection,
+                data,
+            } => {
+                println!("[Orchestrator] Received message from orchestrator");
+                // Handle messages from the orchestrator here
+                match stream.real_stream_id() {
+                    STREAM_HANDSHAKE => {
+                        println!("[Orchestrator] Handshake message received");
+                        // Handle handshake messages
+                        if let Ok(msg) = bincode::deserialize::<ServerInfo>(&data) {
+                            self_stats.external_url = msg.ip;
+                            self_stats.external_port = msg.port;
+                            self_stats.zone = msg.zone;
+                            println!("[Server] external url is {}:{}", self_stats.external_url, self_stats.external_port);
+                            println!("[Server] zone is {}", self_stats.zone);
+                        } else {
+                            eprintln!("[Orchestrator] Failed to deserialize handshake message");
+                        }
+                    }
+                    _ => {
+                        println!(
+                            "[Orchestrator] Received message on stream {}",
+                            stream.real_stream_id()
+                        );
+                    }
+                }
+            }
+
+            GameNetworkEvent::Disconnected { .. } => {
+                println!("[Orchestrator] Disconnected from orchestrator");
+                orch.connection = None;
+            }
+            _ => {}
         }
     }
 }
@@ -269,7 +290,10 @@ fn send_heartbeat_system(
         if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
             let data = Bytes::from(json_bytes);
 
-            let heartbeat_stream = GameStream::new(shared_replication::STREAM_HEARTBEAT, GameStreamReliability::Unreliable);
+            let heartbeat_stream = GameStream::new(
+                shared_replication::STREAM_HEARTBEAT,
+                GameStreamReliability::Unreliable,
+            );
 
             if let Err(e) = orch.peer.send(conn, &heartbeat_stream, data) {
                 eprintln!("[Server] Erreur d'envoi du heartbeat: {:?}", e);

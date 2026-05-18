@@ -1,4 +1,6 @@
 mod network;
+mod structs;
+
 use bevy::prelude::*;
 use bytes::Bytes;
 use shared_replication::{PlayerInput, STREAM_INPUTS};

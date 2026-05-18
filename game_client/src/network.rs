@@ -1,15 +1,15 @@
-﻿use bevy::app::{App, Plugin, PreUpdate, Update};
+﻿use crate::{PlayerBundle};
+use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::{Circle, ColorMaterial, Commands, Component, Entity, MeshMaterial2d, Message, MessageReader, MessageWriter, Query, ResMut, Resource, Transform};
 use bytes::Bytes;
-use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 use game_sockets::protocols::QuicBackend;
-use shared_replication::{PersonalSnapshot, STREAM_SNAPSHOTS, STREAM_HANDSHAKE, NetMessages};
+use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 use shared_replication::NetMessages::WELCOME;
-use crate::{PlayerBundle};
-
+use shared_replication::{NetMessages, PersonalSnapshot, STREAM_HANDSHAKE, STREAM_SNAPSHOTS};
+use std::env;
 #[derive(Resource, Default)]
 struct LocalPlayer {
     // Vaut 'None' tant qu'on n'a pas reçu le WELCOME
@@ -37,24 +37,31 @@ pub struct ClientNetworkPlugin;
 
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
+
+        let args: Vec<String> = env::args().collect();
+
+        println!("{}", args[1]);
+        let ip = args[1].clone();
+        println!("{:?}", args[2]);
+        let port = args[2].clone();
+        let port = port.parse::<u16>().expect("Le port doit être un nombre");
         // On enregistre les systèmes liés aux joueurs
         // 1. Initialisation de la librairie réseau
         let peer = GamePeer::new(QuicBackend::new());
 
         println!("[Client] Connexion au serveur...");
-        peer.connect("127.0.0.1", 5000).expect("Impossible de se connecter");
+        peer.connect(ip.as_str(), port)
+            .expect("Impossible de se connecter");
 
-        app
-            .insert_resource(NetworkManager { peer })
+        app.insert_resource(NetworkManager { peer })
             .insert_resource(ServerConnection::default())
             .insert_resource(LocalPlayer::default())
             // "event" réception de snapshot
             .add_message::<SnapshotMessage>()
             .add_systems(PreUpdate, network_bridge_system)
-            .add_systems(Update,process_snapshots);
+            .add_systems(Update, process_snapshots);
     }
 }
-
 
 // --- LE PONT RÉSEAU ---
 // Lit la lib et génère des messages Bevy
@@ -72,13 +79,13 @@ fn network_bridge_system(
                 server_conn.0 = Some(conn.clone());
 
                 // On prépare notre demande de connexion
-                let join_req = NetMessages::JOIN ("Antonin".to_string());
-
+                let join_req = NetMessages::JOIN("Antonin".to_string());
 
                 if let Ok(bytes) = bincode::serialize(&join_req) {
                     let data = Bytes::from(bytes);
                     // todo : make this reliable
-                    let stream = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
+                    let stream =
+                        GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
                     let _ = net.peer.send(&conn, &stream, data);
                 }
             }
@@ -88,18 +95,16 @@ fn network_bridge_system(
                 // N'oublie pas ton correctif .get_id() pour le bitmask !
                 match stream.real_stream_id() {
                     // --- GESTION DU HANDSHAKE ---
-                    STREAM_HANDSHAKE => {
-                       match bincode::deserialize::<NetMessages>(&data) {
-                             Ok(WELCOME(welcome))  => {
-                                    println!("[Client] Reçu WELCOME : {}", welcome);
-                                    if let Ok(client_uuid) = uuid::Uuid::parse_str(&welcome) {
-                                        println!("[Client] UUID du joueur : {}", client_uuid);
-                                        local_player.net_id = Some(client_uuid);
-                                    }
-                                }
-                            _ => {}
+                    STREAM_HANDSHAKE => match bincode::deserialize::<NetMessages>(&data) {
+                        Ok(WELCOME(welcome)) => {
+                            println!("[Client] Reçu WELCOME : {}", welcome);
+                            if let Ok(client_uuid) = uuid::Uuid::parse_str(&welcome) {
+                                println!("[Client] UUID du joueur : {}", client_uuid);
+                                local_player.net_id = Some(client_uuid);
+                            }
                         }
-                    }
+                        _ => {}
+                    },
 
                     // --- GESTION DES SNAPSHOTS ---
                     STREAM_SNAPSHOTS => {
@@ -139,7 +144,9 @@ fn process_snapshots(
         latest_snapshot = Some(&msg.0);
     }
 
-    let Some(snapshot) = latest_snapshot else { return };
+    let Some(snapshot) = latest_snapshot else {
+        return;
+    };
 
     for net_entity in &snapshot.entities {
         let existing_entity = query_net_entities
@@ -152,13 +159,16 @@ fn process_snapshots(
             continue;
         }
 
-        println!("Nouvelle entité réseau découverte : {}", net_entity.network_id);
+        println!(
+            "Nouvelle entité réseau découverte : {}",
+            net_entity.network_id
+        );
 
         commands.spawn((
             PlayerBundle {
                 mesh: Mesh2d(meshes.add(Circle::new(10.0))),
                 material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-                transform: Transform::from_xyz(net_entity.position[0], net_entity.position[1], 0.0 )
+                transform: Transform::from_xyz(net_entity.position[0], net_entity.position[1], 0.0),
             },
             NetworkEntity(net_entity.network_id),
         ));
