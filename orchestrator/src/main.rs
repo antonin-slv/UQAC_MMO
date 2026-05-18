@@ -6,10 +6,11 @@ mod redis_manager;
 use crate::docker_manager::DockerManager;
 use crate::redis_manager::{GameServer, RedisManager};
 use anyhow::Result;
+use bytes::Bytes;
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameNetworkEvent, GamePeer};
-use shared_replication::{Heartbeat, STREAM_HEARTBEAT};
+use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
+use shared_replication::{Heartbeat, STREAM_HANDSHAKE, STREAM_HEARTBEAT, ServerInfo};
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,9 +94,12 @@ async fn main() -> Result<()> {
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
     let mut server = redis.create_server().await?;
 
-    let ip_address = docker.spawn_container(&server.id).await?;
+    let (ip_address, port) = docker.spawn_container(&server.id).await?;
 
     server.address = ip_address;
+    server.port = port;
+
+    redis.update_server(&server).await?;
 
     Ok(server)
 }
@@ -107,6 +111,18 @@ async fn listen_heartbeat(
 ) -> Result<()> {
     while let Ok(Some(event)) = peer.poll() {
         match event {
+            GameNetworkEvent::Connected(connection) => {
+                let server_info = ServerInfo {
+                    ip: "".to_string(),
+                    port: 2,
+                    zone: "".to_string(),
+                };
+                if let Ok(bytes) = bincode::serialize(&server_info) {
+                    let data = Bytes::from(bytes);
+                    let gs = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
+                    let _ = peer.send(&connection, &gs, data);
+                }
+            }
             GameNetworkEvent::Message {
                 connection,
                 stream,
@@ -148,6 +164,7 @@ async fn on_heartbeat_received(
             }
         }
         server.players_online = heartbeat.player_count as u32;
+        server.area = heartbeat.zone;
         redis.update_server(&server).await?;
     } else {
         eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là")

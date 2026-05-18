@@ -1,10 +1,11 @@
 use anyhow::Result;
 use bollard::Docker;
-use bollard::container::{
-    Config, CreateContainerOptions, InspectContainerOptions, StartContainerOptions,
-    StopContainerOptions,
+use bollard::config::ContainerCreateBody;
+use bollard::models::{HostConfig, PortBinding};
+use bollard::query_parameters::{
+    CreateContainerOptions, InspectContainerOptions, StartContainerOptions, StopContainerOptions,
 };
-use bollard::models::HostConfig;
+use std::collections::HashMap;
 use std::env;
 
 pub struct DockerManager {
@@ -23,7 +24,7 @@ impl DockerManager {
         Ok(manager)
     }
 
-    pub async fn spawn_container(&self, id: &String) -> Result<String> {
+    pub async fn spawn_container(&self, id: &String) -> Result<(String, u16)> {
         let valid_env = vec![
             format!(
                 "HEARTBEAT_INTERVAL={}",
@@ -33,10 +34,16 @@ impl DockerManager {
                 "SERV_FREQUENCY={}",
                 env::var("SERV_FREQUENCY").expect("Env SERV_FREQUENCY must be set")
             ),
+            "SERVER_LISTEN_IP=0.0.0.0".to_string(),
             "SERVER_EXT_IP=127.0.0.1".to_string(),
+            "SERVER_LISTEN_PORT=5000".to_string(),
             "SERVER_EXT_PORT=5000".to_string(),
             format!("SERVER_UUID={}", id),
-            format!("ORCHESTRATOR_URL={}:3631", self.self_ip),
+            format!(
+                "ORCHESTRATOR_URL={}:{}",
+                self.self_ip,
+                env::var("ORCH_PORT").expect("Env ORCH_PORT must be set")
+            ),
             format!(
                 "MAX_PLAYER_PER_SERVER={}",
                 env::var("MAX_PLAYER_PER_SERVER").expect("Env MAX_PLAYER_PER_SERVER must be set")
@@ -45,16 +52,25 @@ impl DockerManager {
 
         let image = env::var("GAME_SERVER_IMAGE").expect("Env GAME_SERVER_IMAGE is not set");
 
-        let config = Config {
+        let mut port_bindings = HashMap::new();
+        port_bindings.insert(
+            "5000/udp".to_string(),
+            Some(vec![PortBinding {
+                host_port: Some("0".to_string()), // Demande explicitement à docker un nouveau port
+                host_ip: Some("0.0.0.0".to_string()),
+            }]),
+        );
+        let config = ContainerCreateBody {
             image: Some(image),
             tty: Some(true),
             host_config: Some(HostConfig {
                 auto_remove: Some(true),
                 network_mode: Some("mmo_network".to_string()),
+                port_bindings: Some(port_bindings),
                 ..Default::default()
             }),
             env: Some(valid_env),
-
+            exposed_ports: Some(vec!["5000/udp".to_string()]),
             ..Default::default()
         };
 
@@ -63,15 +79,15 @@ impl DockerManager {
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: name.clone(),
-                    platform: None,
+                    name: Some(name.clone()),
+                    ..Default::default()
                 }),
                 config,
             )
             .await?;
 
         self.docker
-            .start_container(name.as_str(), None::<StartContainerOptions<String>>)
+            .start_container(name.as_str(), None::<StartContainerOptions>)
             .await?;
 
         let container_data = self
@@ -80,6 +96,7 @@ impl DockerManager {
             .await?;
 
         let server_ip = container_data
+            .clone()
             .network_settings
             .and_then(|ns| ns.networks)
             .and_then(|nets| {
@@ -89,11 +106,26 @@ impl DockerManager {
             })
             .filter(|ip| !ip.is_empty());
 
-        Ok(server_ip.expect("Feur"))
+        println!("{:?}", container_data.network_settings.clone());
+        let assigned_port = container_data
+            .network_settings
+            .and_then(|ns| ns.ports)
+            .and_then(|ports| ports.get("5000/udp").cloned())
+            .and_then(|bindings| bindings)
+            .and_then(|bindings_list| bindings_list.first().cloned())
+            .and_then(|binding| binding.host_port)
+            .expect("Container doesn't have host port")
+            .parse::<u16>()
+            .expect("Host port is not a number");
+
+        Ok((server_ip.expect("Docker problem cpt"), assigned_port))
     }
 
     pub async fn terminate_container(&self, id: &String) -> Result<()> {
-        let stop_options = StopContainerOptions { t: 10 };
+        let stop_options = StopContainerOptions {
+            t: Some(10),
+            ..Default::default()
+        };
 
         let name = format!("server-{}", id);
 
@@ -107,21 +139,10 @@ impl DockerManager {
     }
 
     async fn get_container_ip(docker: &Docker) -> Result<String> {
-        // 1. Inspecter le container à partir de son nom
         let inspect_result = docker.inspect_container("orchestrator", None).await?;
 
-        // 2. Naviguer dans les métadonnées réseau du container
         if let Some(network_settings) = inspect_result.network_settings {
-            // Option A : Si vos containers sont sur le réseau par défaut ("bridge")
-            if let Some(ip_address) = network_settings.ip_address {
-                if !ip_address.is_empty() {
-                    return Ok(ip_address);
-                }
-            }
-
-            // Option B : Si vous utilisez un réseau personnalisé dans votre Docker Compose
             if let Some(networks) = network_settings.networks {
-                // On prend la première IP disponible dans la liste des réseaux connectés
                 if let Some(network_config) = networks.values().next() {
                     if let Some(ip_address) = &network_config.ip_address {
                         if !ip_address.is_empty() {
