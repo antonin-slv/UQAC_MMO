@@ -1,6 +1,7 @@
 // shared/src/lib.rs
 use serde::{Deserialize, Serialize};
 
+pub mod redis_manager;
 // -- les différents streams de données
 
 pub const STREAM_HANDSHAKE: u16 = 0;

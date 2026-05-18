@@ -14,6 +14,6 @@ WORKDIR /app
 # On récupère l'exécutable
 COPY --from=builder /usr/src/app/target/release/gate_keeper /app/gate_keeper
 
-EXPOSE 3630/udp
+EXPOSE 3630/tcp
 
 CMD ["./gate_keeper"]

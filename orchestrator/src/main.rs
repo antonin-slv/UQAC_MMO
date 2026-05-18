@@ -1,10 +1,9 @@
 extern crate redis;
 
 mod docker_manager;
-mod redis_manager;
 
 use crate::docker_manager::DockerManager;
-use crate::redis_manager::{GameServer, RedisManager};
+use shared_replication::redis_manager::{GameServer, RedisManager};
 use anyhow::Result;
 use bytes::Bytes;
 use dotenv::dotenv;
