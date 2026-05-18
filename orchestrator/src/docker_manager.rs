@@ -24,7 +24,7 @@ impl DockerManager {
         Ok(manager)
     }
 
-    pub async fn spawn_container(&self, id: &String) -> Result<(String, u16)> {
+    pub async fn spawn_container(&self, id: &String) -> Result<u16> {
         let valid_env = vec![
             format!(
                 "HEARTBEAT_INTERVAL={}",
@@ -95,18 +95,6 @@ impl DockerManager {
             .inspect_container(name.as_str(), None::<InspectContainerOptions>)
             .await?;
 
-        let server_ip = container_data
-            .clone()
-            .network_settings
-            .and_then(|ns| ns.networks)
-            .and_then(|nets| {
-                nets.values()
-                    .next()
-                    .and_then(|endpoint| endpoint.ip_address.clone())
-            })
-            .filter(|ip| !ip.is_empty());
-
-        println!("{:?}", container_data.network_settings.clone());
         let assigned_port = container_data
             .network_settings
             .and_then(|ns| ns.ports)
@@ -118,7 +106,7 @@ impl DockerManager {
             .parse::<u16>()
             .expect("Host port is not a number");
 
-        Ok((server_ip.expect("Docker problem cpt"), assigned_port))
+        Ok(assigned_port)
     }
 
     pub async fn terminate_container(&self, id: &String) -> Result<()> {

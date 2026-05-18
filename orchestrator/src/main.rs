@@ -3,12 +3,12 @@ extern crate redis;
 mod docker_manager;
 
 use crate::docker_manager::DockerManager;
-use shared_replication::redis_manager::{GameServer, RedisManager};
 use anyhow::Result;
 use bytes::Bytes;
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
+use shared_replication::redis_manager::{GameServer, RedisManager};
 use shared_replication::{Heartbeat, STREAM_HANDSHAKE, STREAM_HEARTBEAT, ServerInfo};
 use std::env;
 use std::sync::Arc;
@@ -93,9 +93,8 @@ async fn main() -> Result<()> {
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
     let mut server = redis.create_server().await?;
 
-    let (ip_address, port) = docker.spawn_container(&server.id).await?;
+    let port = docker.spawn_container(&server.id).await?;
 
-    server.address = ip_address;
     server.port = port;
 
     redis.update_server(&server).await?;

@@ -20,10 +20,10 @@ impl GameServer {
     pub fn new(id: String, players_max: u32) -> Self {
         Self {
             id,
-            address: "".to_string(),
+            address: env::var("HOST_ADDRESS").expect("Env HOST_ADDRESS is not set"),
             players_max,
             players_online: 0,
-            port: 4265,
+            port: 5000,
             area: "NA".to_string(),
         }
     }
