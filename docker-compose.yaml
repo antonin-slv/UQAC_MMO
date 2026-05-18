@@ -1,7 +1,7 @@
 networks:
   mmo_network:
     driver: bridge
-    name: mmo_network
+    name: mmo-network
 
 services:
   game_server:
@@ -10,8 +10,6 @@ services:
       dockerfile: game_server/Dockerfile
     image: game-server
 
-
-  # Service de base de données PostgreSQL
   db:
     image: postgres:15-alpine
     container_name: postgres
@@ -23,9 +21,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - mmo_network
+      - mmo-network
 
-  # Service de cache Redis
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -35,7 +32,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - mmo_network
+      - mmo-network
 
   orchestrator:
     build:
@@ -54,28 +51,7 @@ services:
     restart: always
     container_name: orchestrator
     networks:
-      - mmo_network
-  dbgate:
-    image: dbgate/dbgate
-    ports:
-      - "8081:3000"
-    networks:
-      - mmo_network
-    environment:
-      CONNECTIONS: con1,con2
-      # Postgres (utilise les variables du .env)
-      LABEL_con1: Postgres
-      ENGINE_con1: postgres@dbgate-plugin-postgres
-      SERVER_con1: db
-      USER_con1: ${POSTGRES_USER}
-      PASSWORD_con1: ${POSTGRES_PASSWORD}
-      PORT_con1: 5432
-      DATABASE_con1: ${POSTGRES_DB}
-      # Redis
-      LABEL_con2: Redis
-      ENGINE_con2: redis@dbgate-plugin-redis
-      SERVER_con2: redis
-      PORT_con2: 6379
+      - mmo-network
 
   gate_keeper:
     build:
@@ -92,7 +68,27 @@ services:
     restart: always
     container_name: gate-keeper
     networks:
-      - mmo_network
+      - mmo-network
+
+  dbgate:
+    image: dbgate/dbgate
+    ports:
+      - "8081:3000"
+    networks:
+      - mmo-network
+    environment:
+      CONNECTIONS: con1,con2
+      LABEL_con1: Postgres
+      ENGINE_con1: postgres@dbgate-plugin-postgres
+      SERVER_con1: db
+      USER_con1: ${POSTGRES_USER}
+      PASSWORD_con1: ${POSTGRES_PASSWORD}
+      PORT_con1: 5432
+      DATABASE_con1: ${POSTGRES_DB}
+      LABEL_con2: Redis
+      ENGINE_con2: redis@dbgate-plugin-redis
+      SERVER_con2: redis
+      PORT_con2: 6379
 
 volumes:
   postgres_data:
