@@ -35,9 +35,7 @@ impl DockerManager {
                 env::var("SERV_FREQUENCY").expect("Env SERV_FREQUENCY must be set")
             ),
             "SERVER_LISTEN_IP=0.0.0.0".to_string(),
-            "SERVER_EXT_IP=127.0.0.1".to_string(),
             "SERVER_LISTEN_PORT=5000".to_string(),
-            "SERVER_EXT_PORT=5000".to_string(),
             format!("SERVER_UUID={}", id),
             format!(
                 "ORCHESTRATOR_URL={}:{}",
