@@ -16,3 +16,4 @@ docker compose up -d
 ````bash
 cargo run --package game_client --bin game_client -- 127.0.0.1 [PORT]
 ````
+![Demo](./demo.png)
