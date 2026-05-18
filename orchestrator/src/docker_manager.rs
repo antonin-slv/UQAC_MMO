@@ -24,7 +24,7 @@ impl DockerManager {
         Ok(manager)
     }
 
-    pub async fn spawn_container(&self, id: &String) -> Result<u16> {
+    pub async fn spawn_container(&self, id: String) -> Result<u16> {
         let valid_env = vec![
             format!(
                 "HEARTBEAT_INTERVAL={}",

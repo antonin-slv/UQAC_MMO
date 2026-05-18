@@ -13,6 +13,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -105,13 +106,11 @@ async fn main() -> Result<()> {
 }
 
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
-    let mut server = redis.create_server().await?;
+    let new_server_id = Uuid::new_v4();
 
-    let port = docker.spawn_container(&server.id).await?;
+    let port = docker.spawn_container(new_server_id.to_string()).await?;
 
-    server.port = port;
-
-    redis.update_server(&server).await?;
+    let server = redis.create_server(new_server_id.to_string(), port).await?;
 
     Ok(server)
 }
