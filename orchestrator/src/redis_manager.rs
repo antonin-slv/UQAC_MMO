@@ -1,6 +1,6 @@
 use anyhow::Result;
-use redis::AsyncTypedCommands;
 use redis::aio::MultiplexedConnection;
+use redis::{AsyncTypedCommands, ExpireOption};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -47,7 +47,19 @@ impl RedisManager {
 
         let data = serde_json::to_string(server).map_err(anyhow::Error::msg)?;
 
+        let hot_servers_min: i64 = env::var("HOT_SERVERS_MIN")
+            .expect("Env HOT_SERVERS_MIN is not set")
+            .parse()
+            .expect("Env HOT_SERVERS_MIN is not an integer");
+
         con.hset("server", server.id.as_str(), data).await?;
+        con.hexpire(
+            "server",
+            hot_servers_min * 3,
+            ExpireOption::NONE,
+            server.id.as_str(),
+        )
+        .await?;
 
         Ok(())
     }
