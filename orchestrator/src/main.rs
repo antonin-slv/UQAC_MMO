@@ -4,12 +4,11 @@ mod docker_manager;
 
 use crate::docker_manager::DockerManager;
 use anyhow::Result;
-use bytes::Bytes;
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
+use game_sockets::{GameNetworkEvent, GamePeer};
 use shared_replication::redis_manager::{GameServer, RedisManager};
-use shared_replication::{Heartbeat, STREAM_HANDSHAKE, STREAM_HEARTBEAT, ServerInfo};
+use shared_replication::{Heartbeat, STREAM_HEARTBEAT};
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,10 +38,9 @@ async fn main() -> Result<()> {
     println!("Start tasks");
 
     let redis_heartbeat = Arc::clone(&redis);
-    let docker_heartbeat = Arc::clone(&docker);
 
     let heartbeat_handle = tokio::spawn(async move {
-        let mut ticker = interval(Duration::from_secs(3));
+        let mut ticker = interval(Duration::from_secs(1));
 
         let mut peer = GamePeer::new(QuicBackend::new());
 
@@ -54,7 +52,7 @@ async fn main() -> Result<()> {
         loop {
             ticker.tick().await;
 
-            if let Err(e) = listen_heartbeat(&mut peer, &redis_heartbeat, &docker_heartbeat).await {
+            if let Err(e) = listen_heartbeat(&mut peer, &redis_heartbeat).await {
                 println!("orchestrator error: {}", e);
             }
         }
@@ -81,6 +79,22 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+
+                available_server.retain(|s| s.players_online == 0);
+
+                while available_server.len() > hot_servers_min as usize {
+                    if let Some(server) = available_server.first() {
+                        docker
+                            .terminate_container(&server.id)
+                            .await
+                            .expect("Couldn't terminate container");
+                        redis
+                            .remove_server(&server.id)
+                            .await
+                            .expect("Couldn't remove server");
+                        available_server.remove(0);
+                    }
+                }
             }
         }
     });
@@ -102,32 +116,16 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
     Ok(server)
 }
 
-async fn listen_heartbeat(
-    peer: &mut GamePeer,
-    redis: &RedisManager,
-    docker: &DockerManager,
-) -> Result<()> {
+async fn listen_heartbeat(peer: &mut GamePeer, redis: &RedisManager) -> Result<()> {
     while let Ok(Some(event)) = peer.poll() {
         match event {
-            GameNetworkEvent::Connected(connection) => {
-                let server_info = ServerInfo {
-                    ip: "".to_string(),
-                    port: 2,
-                    zone: "".to_string(),
-                };
-                if let Ok(bytes) = bincode::serialize(&server_info) {
-                    let data = Bytes::from(bytes);
-                    let gs = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
-                    let _ = peer.send(&connection, &gs, data);
-                }
-            }
             GameNetworkEvent::Message {
                 connection,
                 stream,
                 data,
             } => match stream.real_stream_id() {
                 STREAM_HEARTBEAT => match serde_json::from_slice::<Heartbeat>(&data) {
-                    Ok(heartbeat) => on_heartbeat_received(&redis, &docker, heartbeat).await?,
+                    Ok(heartbeat) => on_heartbeat_received(&redis, heartbeat).await?,
                     Err(e) => {
                         eprintln!("Invalid heartbeat {} : {}", connection.connection_uuid, e)
                     }
@@ -141,28 +139,10 @@ async fn listen_heartbeat(
     Ok(())
 }
 
-async fn on_heartbeat_received(
-    redis: &RedisManager,
-    docker: &DockerManager,
-    heartbeat: Heartbeat,
-) -> Result<()> {
+async fn on_heartbeat_received(redis: &RedisManager, heartbeat: Heartbeat) -> Result<()> {
     let server = redis.get_server(heartbeat.id).await?;
     if let Some(mut server) = server {
-        if heartbeat.player_count == 0 {
-            let hot_servers_min: u16 = env::var("HOT_SERVERS_MIN")
-                .expect("Env HOT_SERVERS_MIN is not set")
-                .parse()
-                .expect("Env HOT_SERVERS_MIN is not an integer");
-
-            let available_server = redis.get_available_servers().await?;
-
-            if available_server.len() > hot_servers_min as usize {
-                docker.terminate_container(&server.id).await?;
-                redis.remove_server(&server.id).await?;
-            }
-        }
         server.players_online = heartbeat.player_count as u32;
-        server.area = heartbeat.zone;
         redis.update_server(&server).await?;
     } else {
         eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là")
