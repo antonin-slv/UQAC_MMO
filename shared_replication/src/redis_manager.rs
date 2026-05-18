@@ -1,10 +1,9 @@
 use anyhow::Result;
-use redis::AsyncTypedCommands;
 use redis::aio::MultiplexedConnection;
+use redis::{AsyncTypedCommands, ExpireOption};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
-use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameServer {
@@ -17,13 +16,13 @@ pub struct GameServer {
 }
 
 impl GameServer {
-    pub fn new(id: String, players_max: u32) -> Self {
+    pub fn new(id: String, players_max: u32, port: u16) -> Self {
         Self {
             id,
-            address: "".to_string(),
+            address: env::var("HOST_ADDRESS").expect("Env HOST_ADDRESS is not set"),
             players_max,
             players_online: 0,
-            port: 4265,
+            port,
             area: "NA".to_string(),
         }
     }
@@ -47,7 +46,19 @@ impl RedisManager {
 
         let data = serde_json::to_string(server).map_err(anyhow::Error::msg)?;
 
+        let hot_servers_min: i64 = env::var("HOT_SERVERS_MIN")
+            .expect("Env HOT_SERVERS_MIN is not set")
+            .parse()
+            .expect("Env HOT_SERVERS_MIN is not an integer");
+
         con.hset("server", server.id.as_str(), data).await?;
+        con.hexpire(
+            "server",
+            hot_servers_min * 3,
+            ExpireOption::NONE,
+            server.id.as_str(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -98,13 +109,14 @@ impl RedisManager {
         Ok(())
     }
 
-    pub async fn create_server(&self) -> Result<GameServer> {
+    pub async fn create_server(&self, id: String, port: u16) -> Result<GameServer> {
         let new_server = GameServer::new(
-            Uuid::new_v4().to_string(),
+            id,
             env::var("MAX_PLAYER_PER_SERVER")
                 .expect("Env MAX_PLAYER_PER_SERVER is not set")
                 .parse()
                 .expect("Max player per server is not a valid number"),
+            port,
         );
 
         self.update_server(&new_server).await?;

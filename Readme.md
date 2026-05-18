@@ -2,13 +2,17 @@
 
 ## Description
 
-This project explores MMORPG games, especially the network side of it (as it is in the context of a course on network programming ).
+This project explores MMORPG games, especially the network side of it (as it is in the context of a course on network
+programming ).
 
-# Game Server Deployement
+# Game Server Deployment
 
+### Start GateKeeper + Orchestrator + Servers 
 ````bash
-docker build -t mon_game_server:local -f game_server.Dockerfile .
-
-#pour tester en local : 
-docker run -d --name serveur_test -p 5000:5000/udp -e HEARTBEAT_INTERVAL=3  -e ORCHESTRATOR_URL=127.0.0.1:8080  -e SERV_FREQUENCY=60  -e SERVER_UUID=550e8400-e29b-41d4-a716-446655440000 -e SERVER_EXT_IP=127.0.0.1 -e SERVER_EXT_PORT=5000 mon_game_server:local
+cp .env.example .env
+docker compose up -d
+````
+### Start client (with the port return by the GateKeeper)
+````bash
+cargo run --package game_client --bin game_client -- 127.0.0.1 [PORT]
 ````

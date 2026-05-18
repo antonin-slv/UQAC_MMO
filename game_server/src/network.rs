@@ -1,5 +1,6 @@
 // server/src/network.rs
 
+use std::env;
 use crate::events;
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
@@ -10,7 +11,6 @@ use events::{
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 use shared_replication::{Heartbeat, NetMessages, PlayerInput, ServerInfo, STREAM_HANDSHAKE, STREAM_INPUTS};
-use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
 const INNER_PORT_ENV_NAME: &str = "SERVER_LISTEN_PORT";
@@ -18,6 +18,7 @@ const INNER_PORT_ENV_NAME: &str = "SERVER_LISTEN_PORT";
 const ORCH_URL_ENV_NAME: &str = "ORCHESTRATOR_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
+const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
 
 #[derive(Resource)]
 pub struct NetworkManager {
@@ -84,6 +85,19 @@ impl Plugin for NetworkPlugin {
                 5000
             });
         println!("[Server] local listen {}:{}", listen_ip, listen_port);
+
+        let max_players = env::var(MAX_PLAYER_PER_SERVER);
+
+        let max_players = match max_players {
+            Ok(port_str) => port_str.parse::<usize>().unwrap_or_else(|_| {
+                panic!("Error : {} must be a valid u16", MAX_PLAYER_PER_SERVER);
+            }),
+            Err(_) => {
+                panic!("Error : {} must be set", MAX_PLAYER_PER_SERVER);
+            }
+        };
+        println!("[Server] MAX PLAYERS : {}", max_players);
+
 
         let heartbeat_interval = env::var(HEARTBEAT_RATE_ENV_NAME);
 
@@ -163,7 +177,7 @@ impl Plugin for NetworkPlugin {
                 ServerStats {
                     zone: "default".to_string(),
                     total_players: 0,
-                    max_players: 100,
+                    max_players,
                     external_url: "".to_string(),
                     external_port: 0,
                     uuid: server_uuid,
@@ -276,12 +290,12 @@ fn send_heartbeat_system(
         if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
             let data = Bytes::from(json_bytes);
 
-            let useless_stream = GameStream::new(
+            let heartbeat_stream = GameStream::new(
                 shared_replication::STREAM_HEARTBEAT,
                 GameStreamReliability::Unreliable,
             );
 
-            if let Err(e) = orch.peer.send(conn, &useless_stream, data) {
+            if let Err(e) = orch.peer.send(conn, &heartbeat_stream, data) {
                 eprintln!("[Server] Erreur d'envoi du heartbeat: {:?}", e);
             } else {
                 println!(
