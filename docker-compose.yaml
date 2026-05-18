@@ -1,7 +1,7 @@
 networks:
   mmo_network:
     driver: bridge
-    name: mmo-network
+    name: mmo_network
 
 services:
   game_server:
@@ -21,7 +21,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - mmo-network
+      - mmo_network
 
   redis:
     image: redis:7-alpine
@@ -32,7 +32,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - mmo-network
+      - mmo_network
 
   orchestrator:
     build:
@@ -51,7 +51,7 @@ services:
     restart: always
     container_name: orchestrator
     networks:
-      - mmo-network
+      - mmo_network
 
   gate_keeper:
     build:
@@ -68,14 +68,14 @@ services:
     restart: always
     container_name: gate-keeper
     networks:
-      - mmo-network
+      - mmo_network
 
   dbgate:
     image: dbgate/dbgate
     ports:
       - "8081:3000"
     networks:
-      - mmo-network
+      - mmo_network
     environment:
       CONNECTIONS: con1,con2
       LABEL_con1: Postgres
