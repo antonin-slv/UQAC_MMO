@@ -1,5 +1,5 @@
 ﻿use crate::{PlayerBundle};
-use crate::structs::ClientState;
+use crate::structs::{ClientState, LocalPlayer};
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;
@@ -11,13 +11,6 @@ use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameS
 use shared_replication::NetMessages::WELCOME;
 use shared_replication::{NetMessages, PersonalSnapshot, STREAM_HANDSHAKE, STREAM_SNAPSHOTS};
 use std::env;
-
-#[derive(Resource, Default)]
-pub(crate) struct LocalPlayer {
-    // Vaut 'None' tant qu'on n'a pas reçu le WELCOME
-    pub net_id: Option<uuid::Uuid>,
-    pub pseudo: Option<String>
-}
 
 #[derive(Component)]
 struct NetworkEntity(u32);

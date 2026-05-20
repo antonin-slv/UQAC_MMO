@@ -3,7 +3,7 @@ use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bevy::tasks::{IoTaskPool, Task};
 use futures_lite::future;
 use crate::network::NetworkManager;
-use crate::structs::ClientState;
+use crate::structs::{ClientState, LocalPlayer};
 use shared_replication::{LoginResponse, Register};
 
 // Les données tapées par l'utilisateur
@@ -33,7 +33,7 @@ fn ui_login_menu(
     mut ui_data: ResMut<LoginUiData>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<ClientState>>,
-    mut local_player: ResMut<crate::network::LocalPlayer>
+    mut local_player: ResMut<LocalPlayer>
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         println!("Impossible d'obtenir le contexte Egui");
