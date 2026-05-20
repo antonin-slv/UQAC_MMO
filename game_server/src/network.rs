@@ -178,8 +178,8 @@ impl Plugin for NetworkPlugin {
                     zone: "default".to_string(),
                     total_players: 0,
                     max_players,
-                    external_url: "".to_string(),
-                    external_port: 0,
+                    external_url: listen_ip.to_string(),
+                    external_port: listen_port,
                     uuid: server_uuid,
                 },
             );
@@ -279,8 +279,6 @@ fn send_heartbeat_system(
         // On construit le payload
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
-            ip: server_info.external_url.clone(),
-            port: server_info.external_port,
             zone: server_info.zone.clone(),
             player_count: client_directory.sessions.len(),
             max_players: server_info.max_players,

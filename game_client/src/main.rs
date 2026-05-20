@@ -1,10 +1,13 @@
 mod network;
 mod structs;
+mod launcher;
 
 use bevy::prelude::*;
 use bytes::Bytes;
 use shared_replication::{PlayerInput, STREAM_INPUTS};
 use game_sockets::{ GameStream, GameStreamReliability };
+use crate::launcher::LauncherPlugin;
+use crate::structs::ClientState;
 
 #[derive(Bundle)]
 pub struct CameraBundle {
@@ -24,9 +27,10 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(network::ClientNetworkPlugin)
+        .add_plugins(LauncherPlugin)
         // Systèmes
         .add_systems(Startup, setup_graphics)
-        .add_systems(Update, capture_inputs)
+        .add_systems(Update, capture_inputs.run_if(in_state(ClientState::InGame)))
         .run();
     //todo : tenter d'envoyer un message de déconnexion (permettra d'un peu limiter la charge serveur) -> soit event soit à la fin de run.
 }
