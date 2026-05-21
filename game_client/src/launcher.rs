@@ -4,7 +4,7 @@ use bevy::tasks::{IoTaskPool, Task};
 use futures_lite::future;
 use crate::network::NetworkManager;
 use crate::structs::{ClientState, LocalPlayer};
-use shared_replication::{LoginResponse, Register};
+use shared_replication::{LoginResponse, Login};
 
 // Les données tapées par l'utilisateur
 #[derive(Resource)]
@@ -84,8 +84,8 @@ fn ui_login_menu(
                     rt.block_on(async move {
                         let client = reqwest::Client::new();
                         let res = client
-                            .post("http://127.0.0.1:3630/gate-keeper/register")
-                            .json(&Register { username, password })
+                            .post("http://127.0.0.1:3630/gate-keeper/login")
+                            .json(&Login { username, password })
                             .send()
                             .await;
 

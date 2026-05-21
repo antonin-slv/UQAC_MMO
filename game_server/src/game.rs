@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 // server/src/player.rs
 use bevy::prelude::*;
-use game_sockets::{GameStream, GameStreamReliability};
-use shared_replication::{NetMessages, STREAM_HANDSHAKE};
+use shared_replication::{NetMessages};
 pub(crate) use crate::network::{NetworkId, ControlledBy, NetworkIdGenerator};
 use crate::events;
 use crate::network::NetworkManager;
@@ -68,12 +67,9 @@ fn handle_new_players(
 
         if let Ok(bytes) = bincode::serialize(&welcome) {
             let data = bytes.into();
-            //todo: make this reliable
-            let stream = GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
-
-            // 3. Envoi direct au client
+            // on répond au client sur le même stream (à priori STREAM_INPUT)
             let target = game_sockets::GameConnection {connection_uuid : client_uuid };
-            let _ = net.peer.send(&target, &stream, data);
+            let _ = net.peer.send(&target, &msg.stream_used, data);
 
             println!("[Logic] WELCOME envoyé à {}", client_uuid);
         }
@@ -101,8 +97,8 @@ fn apply_player_inputs(
     for ev in ev_input.read() {
         if let Some(player_entity) = client_directory.sessions.get(&ev.client_id) {
             if let Ok((mut transform)) = query.get_mut(*player_entity) {
-                transform.translation.x += f32::from(ev.input_data.right) - f32::from(ev.input_data.left)  ;
-                transform.translation.y -= f32::from(ev.input_data.up) - f32::from(ev.input_data.down)  ;
+                transform.translation.x += f32::from(ev.input_data.is_right()) - f32::from(ev.input_data.is_left())  ;
+                transform.translation.y -= f32::from(ev.input_data.is_up()) - f32::from(ev.input_data.is_down())  ;
             }
         }
     }
