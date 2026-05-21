@@ -4,7 +4,7 @@ use bevy::tasks::{IoTaskPool, Task};
 use futures_lite::future;
 use crate::network::NetworkManager;
 use crate::structs::{ClientState, LocalPlayer};
-use shared_replication::{LoginResponse, Login};
+use shared_replication::{LoginResponse, Login, Register};
 
 // Les données tapées par l'utilisateur
 #[derive(Resource)]
@@ -86,6 +86,49 @@ fn ui_login_menu(
                         let res = client
                             .post("http://127.0.0.1:3630/gate-keeper/login")
                             .json(&Login { username, password })
+                            .send()
+                            .await;
+
+                        match res {
+                            Ok(response) if response.status().is_success() => {
+                                let data = response.json::<LoginResponse>().await.map_err(|e| e.to_string())?;
+                                Ok(data)
+                            }
+                            Ok(response) => Err(format!("Erreur: {}", response.status())),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    }) // Fin du bloc Tokio
+                });
+
+                // 2. On attache la Task à une entité Bevy pour la surveiller
+                commands.spawn(LoginTask(task));
+
+                // 3. On change l'état pour afficher un écran de chargement
+                next_state.set(ClientState::Connecting);
+            }
+
+            if ui.button("S'enregistrer").clicked() {
+                let username = ui_data.username_input.clone();
+                let password = ui_data.password_input.clone();
+                println!("Tentative de connexion avec {} / {}", username, password);
+
+                local_player.pseudo = Some(username.clone());
+
+                let thread_pool = IoTaskPool::get();
+                //1. on tente de se co au gatekeeper
+                let task = thread_pool.spawn(async move {
+                    // 1. On crée un mini-moteur Tokio "jetable" isolé sur ce thread
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Impossible de créer le runtime Tokio");
+
+                    // 2. On exécute ta requête reqwest à l'intérieur de ce moteur
+                    rt.block_on(async move {
+                        let client = reqwest::Client::new();
+                        let res = client
+                            .post("http://127.0.0.1:3630/gate-keeper/register")
+                            .json(&Register { username, password })
                             .send()
                             .await;
 

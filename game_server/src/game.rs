@@ -97,8 +97,11 @@ fn apply_player_inputs(
     for ev in ev_input.read() {
         if let Some(player_entity) = client_directory.sessions.get(&ev.client_id) {
             if let Ok((mut transform)) = query.get_mut(*player_entity) {
-                transform.translation.x += f32::from(ev.input_data.is_right()) - f32::from(ev.input_data.is_left())  ;
-                transform.translation.y -= f32::from(ev.input_data.is_up()) - f32::from(ev.input_data.is_down())  ;
+
+                let xdiff = f32::from(ev.input_data.is_right()) - f32::from(ev.input_data.is_left());
+                let ydiff = f32::from(ev.input_data.is_left()) - f32::from(ev.input_data.is_right());
+                transform.translation.x +=  xdiff * 5.0;
+                transform.translation.y -= ydiff * 5.0;
             }
         }
     }

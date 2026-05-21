@@ -29,11 +29,10 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(network::ClientNetworkPlugin)
         .add_plugins(LauncherPlugin)
-        .insert_resource(Time::<Fixed>::from_seconds(0.1))
+        .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
         // Systèmes
         .add_systems(Startup, setup_graphics)
         .add_systems(FixedUpdate, capture_inputs.run_if(in_state(ClientState::InGame)))
-        .add_systems(Update, capture_inputs.run_if(in_state(ClientState::InGame)))
         .run();
     //todo : tenter d'envoyer un message de déconnexion (permettra d'un peu limiter la charge serveur) -> soit event soit à la fin de run.
 }
