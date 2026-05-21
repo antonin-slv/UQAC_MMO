@@ -99,7 +99,7 @@ fn apply_player_inputs(
             if let Ok((mut transform)) = query.get_mut(*player_entity) {
 
                 let xdiff = f32::from(ev.input_data.is_right()) - f32::from(ev.input_data.is_left());
-                let ydiff = f32::from(ev.input_data.is_left()) - f32::from(ev.input_data.is_right());
+                let ydiff = f32::from(ev.input_data.is_up()) - f32::from(ev.input_data.is_down());
                 transform.translation.x +=  xdiff * 5.0;
                 transform.translation.y -= ydiff * 5.0;
             }

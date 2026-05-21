@@ -58,12 +58,7 @@ fn capture_inputs(
     if keyboard_input.pressed(KeyCode::KeyS) { current_input.set_down(true); }
     if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::KeyQ) { current_input.set_left(true); }
     if keyboard_input.pressed(KeyCode::KeyD) { current_input.set_right(true); }
-
-    if (current_input.0 != 0)  {
-        println!("Input pressed");
-    } else {
-        println!("Input not pressed");
-    }
+    
     // On prépare le flux (Unreliable pour les inputs)
     let stream = GameStream::new(STREAM_INPUTS, GameStreamReliability::Unreliable);
 
