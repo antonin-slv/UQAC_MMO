@@ -6,7 +6,8 @@ members = [
     "gate_keeper",
     "orchestrator",
     "shared_replication",
-    "game_sockets"]
+    "game_sockets",
+    "spatial_server"]
 
 
 #common dependencies
