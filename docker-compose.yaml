@@ -89,7 +89,19 @@ services:
       ENGINE_con2: redis@dbgate-plugin-redis
       SERVER_con2: redis
       PORT_con2: 6379
-
+  broker:
+    build:
+      context: .
+      dockerfile: broker/Dockerfile
+    image: broker
+    env_file:
+      - .env
+    ports:
+      - "3632:3632"
+    restart: always
+    container_name: broker
+    networks:
+      - mmo_network
 volumes:
   postgres_data:
   redis_data:
