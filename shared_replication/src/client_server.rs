@@ -17,7 +17,7 @@ pub struct PersonalSnapshot {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct PlayerInput(pub u32);
+pub struct PlayerInput(pub u16);
 
 impl PlayerInput {
     pub fn get_bit(&self, pos: u8) -> bool {
@@ -39,7 +39,7 @@ impl PlayerInput {
 
     //set pos-th bit to bit value. (0 being right)
     pub fn set_bit(&mut self, bit: bool, pos: u8) {
-        self.0 = (self.0 & !(1u32 << pos)) | ((bit as u32) << pos);
+        self.0 = (self.0 & !(1u16 << pos)) | ((bit as u16) << pos);
     }
 
     pub fn set_up(&mut self, up: bool) {

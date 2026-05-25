@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod redis_manager;
 pub mod client_server;
+pub mod broker;
 pub mod math;
 
 pub const STREAM_HANDSHAKE: u16 = 0;
