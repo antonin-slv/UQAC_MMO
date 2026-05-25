@@ -38,7 +38,7 @@ fn main() {
 
     let mut rng = rand::rng();
 
-    for _ in 1..10 {
+    for _ in 1..1000 {
         let entity_position = Vec2 {
             x: rng.random_range(map_size.min_x..map_size.max_x),
             y: rng.random_range(map_size.min_y..map_size.max_y),

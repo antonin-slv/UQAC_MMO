@@ -1,11 +1,3 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-
-static NEXT_SHARD_ID: AtomicU32 = AtomicU32::new(1);
-
-fn generate_shard_id() -> u32 {
-    NEXT_SHARD_ID.fetch_add(1, Ordering::Relaxed)
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
@@ -83,15 +75,21 @@ pub struct QuadTree {
     capacity: usize,
     entities: Vec<Entity>,
     children: Option<Box<[QuadTree; 4]>>,
-    shard_id: Option<u32>,
+    shard_id: u32,
 }
 
 impl QuadTree {
     pub fn new(bounds: Rect, capacity: usize, max_depth: u8) -> Self {
-        Self::new_internal(bounds, 0, max_depth, capacity)
+        Self::new_internal(bounds, 0, max_depth, capacity, 0)
     }
 
-    fn new_internal(bounds: Rect, depth: u8, max_depth: u8, capacity: usize) -> Self {
+    fn new_internal(
+        bounds: Rect,
+        depth: u8,
+        max_depth: u8,
+        capacity: usize,
+        shard_id: u32,
+    ) -> Self {
         Self {
             bounds,
             depth,
@@ -99,7 +97,7 @@ impl QuadTree {
             capacity,
             entities: Vec::with_capacity(capacity),
             children: None,
-            shard_id: Some(generate_shard_id()),
+            shard_id,
         }
     }
 
@@ -130,10 +128,34 @@ impl QuadTree {
         let sub_bounds = self.bounds.split();
 
         let mut children = Box::new([
-            QuadTree::new_internal(sub_bounds[0], self.depth + 1, self.max_depth, self.capacity),
-            QuadTree::new_internal(sub_bounds[1], self.depth + 1, self.max_depth, self.capacity),
-            QuadTree::new_internal(sub_bounds[2], self.depth + 1, self.max_depth, self.capacity),
-            QuadTree::new_internal(sub_bounds[3], self.depth + 1, self.max_depth, self.capacity),
+            QuadTree::new_internal(
+                sub_bounds[0],
+                self.depth + 1,
+                self.max_depth,
+                self.capacity,
+                self.generate_shard_id(0),
+            ),
+            QuadTree::new_internal(
+                sub_bounds[1],
+                self.depth + 1,
+                self.max_depth,
+                self.capacity,
+                self.generate_shard_id(1),
+            ),
+            QuadTree::new_internal(
+                sub_bounds[2],
+                self.depth + 1,
+                self.max_depth,
+                self.capacity,
+                self.generate_shard_id(2),
+            ),
+            QuadTree::new_internal(
+                sub_bounds[3],
+                self.depth + 1,
+                self.max_depth,
+                self.capacity,
+                self.generate_shard_id(3),
+            ),
         ]);
 
         for entity in self.entities.drain(..) {
@@ -145,8 +167,14 @@ impl QuadTree {
         }
 
         self.children = Some(children);
+    }
 
-        self.shard_id = None;
+    fn generate_shard_id(&mut self, children_id: u8) -> u32 {
+        let offset = self.depth * 2;
+        let mut next_id = children_id as u32;
+        next_id = next_id << offset;
+        next_id |= self.shard_id;
+        next_id
     }
 
     pub fn shard_for(&self, pos: Vec2) -> Option<u32> {
@@ -160,7 +188,7 @@ impl QuadTree {
                 }
             }
         }
-        self.shard_id
+        Some(self.shard_id)
     }
 
     pub fn shards_near(&self, pos: Vec2, margin: f32) -> Vec<u32> {
@@ -179,8 +207,8 @@ impl QuadTree {
             for child in children.iter() {
                 child.collect_shards_near(pos, margin_sqr, results);
             }
-        } else if let Some(id) = self.shard_id {
-            results.push(id);
+        } else {
+            results.push(self.shard_id);
         }
     }
 
@@ -200,10 +228,10 @@ impl QuadTree {
         );
 
         let mut info = format!("{} (Depth: {}", bounds_str, self.depth);
-        if let Some(id) = self.shard_id {
+        if self.children.is_some() {
             info.push_str(&format!(
                 ", Shard ID: {}, Entities: {})",
-                id,
+                self.shard_id,
                 self.entities.len()
             ));
         } else {
