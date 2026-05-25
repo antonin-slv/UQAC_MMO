@@ -70,6 +70,12 @@ pub struct Entity {
     pub pos: Vec2,
 }
 
+impl Entity {
+    pub fn new(id: u32, pos: Vec2) -> Self {
+        Self { id, pos }
+    }
+}
+
 pub struct QuadTree {
     bounds: Rect,
     depth: u8,
@@ -97,21 +103,21 @@ impl QuadTree {
         }
     }
 
-    pub fn insert(&mut self, entity_id: u32, pos: Vec2) -> bool {
-        if !self.bounds.contains(pos) {
+    pub fn insert(&mut self, entity: Entity) -> bool {
+        if !self.bounds.contains(entity.pos) {
             return false;
         }
 
         if let Some(children) = &mut self.children {
             for child in children.iter_mut() {
-                if child.insert(entity_id, pos) {
+                if child.insert(entity) {
                     return true;
                 }
             }
             return false;
         }
 
-        self.entities.push(Entity { id: entity_id, pos });
+        self.entities.push(entity);
 
         if self.entities.len() > self.capacity && self.depth < self.max_depth {
             self.subdivide();
@@ -132,7 +138,7 @@ impl QuadTree {
 
         for entity in self.entities.drain(..) {
             for child in children.iter_mut() {
-                if child.insert(entity.id, entity.pos) {
+                if child.insert(entity) {
                     break;
                 }
             }
@@ -177,6 +183,8 @@ impl QuadTree {
             results.push(id);
         }
     }
+
+    pub fn move_entity(&self) {}
 
     pub fn print_tree(&self) {
         println!("QuadTree Root");

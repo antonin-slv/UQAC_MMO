@@ -1,4 +1,4 @@
-use crate::quadtree::{QuadTree, Rect, Vec2};
+use crate::quadtree::{Entity, QuadTree, Rect, Vec2};
 use dotenv::dotenv;
 use rand::RngExt;
 use std::env;
@@ -34,7 +34,7 @@ fn main() {
 
     let entity_id = 12131u32;
     let entity_position = Vec2 { x: 2326., y: 6161. };
-    quad_tree.insert(entity_id, entity_position);
+    quad_tree.insert(Entity::new(entity_id, entity_position));
 
     let mut rng = rand::rng();
 
@@ -43,7 +43,7 @@ fn main() {
             x: rng.random_range(map_size.min_x..map_size.max_x),
             y: rng.random_range(map_size.min_y..map_size.max_y),
         };
-        quad_tree.insert(rng.random(), entity_position);
+        quad_tree.insert(Entity::new(rng.random(), entity_position));
     }
 
     if let Some(shard_id) = quad_tree.shard_for(entity_position) {
