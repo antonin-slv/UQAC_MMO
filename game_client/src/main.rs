@@ -3,12 +3,13 @@ mod structs;
 mod launcher;
 
 use bevy::prelude::*;
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use shared_replication::{STREAM_INPUTS};
 use shared_replication::client_server::*;
 use game_sockets::{ GameStream, GameStreamReliability };
+use shared_replication::broker::{BrokerMessageHeaders, Input};
 use crate::launcher::LauncherPlugin;
-use crate::structs::ClientState;
+use crate::structs::{ClientState, LocalPlayer};
 
 #[derive(Bundle)]
 pub struct CameraBundle {
@@ -48,6 +49,7 @@ fn capture_inputs(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     net: ResMut<network::NetworkManager>,
     server_conn: Res<network::ServerConnection>,
+    local_player: Res<LocalPlayer>,
 ) {
     // Si on n'est pas encore connecté, on ne fait rien
     let Some(conn) = server_conn.game_connection else { return };
@@ -63,13 +65,18 @@ fn capture_inputs(
     let stream = GameStream::new(STREAM_INPUTS, GameStreamReliability::Unreliable);
 
     // On sérialise et on envoie directement avec la lib
-    // TODO : réplication plus propre (bools-> bitmask)
-    if let Ok(bytes) = bincode::serialize(&current_input) {
-        let data = Bytes::from(bytes);
-        if let Err(e) = net.peer.send(&conn, &stream, data) {
-            eprintln!("Erreur lors de l'envoi des inputs: {:?}", e);
-        }
+    let current_input = PlayerInput::to_u8_slice(&current_input);
+    let mut input_for_net : Input = [0; 16].into();
+    input_for_net[0..2].copy_from_slice(&current_input);//dégueu... mais il faut avancer.
+    let header = BrokerMessageHeaders::ClientInput as u8;
+    let id = local_player.net_id;
 
+    let mut packet = BytesMut::with_capacity(1 + 4 + input_for_net.len());
+    packet.put_u8(header);
+    packet.put_u32_le(id);
+    packet.put_slice(&input_for_net);
+    if let Err(e) = net.peer.send(&conn, &stream, packet.freeze()) {
+        eprintln!("Erreur lors de l'envoi des inputs: {:?}", e);
     } else {
         eprintln!("Erreur lors de l'envoi des inputs");
     }

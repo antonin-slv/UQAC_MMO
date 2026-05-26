@@ -48,6 +48,7 @@ services:
     depends_on:
       - redis
       - game_server
+      - broker
     restart: always
     container_name: orchestrator
     networks:
@@ -98,6 +99,7 @@ services:
       - .env
     ports:
       - "3632:3632"
+      - "3633:3633"
     restart: always
     container_name: broker
     networks:

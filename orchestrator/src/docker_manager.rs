@@ -11,15 +11,27 @@ use std::env;
 pub struct DockerManager {
     docker: Docker,
     self_ip: String,
+    pub broker_ip: String,
+    pub broker_private_port: u16,
 }
 
 impl DockerManager {
     pub async fn new() -> Result<Self> {
         let docker = Docker::connect_with_socket_defaults()?;
 
-        let self_ip = Self::get_container_ip(&docker).await?;
+        let self_ip = Self::get_ip_of_named_container(&docker, "orchestrator").await?;
 
-        let manager = Self { docker, self_ip };
+        let broker_ip = Self::get_ip_of_named_container(&docker, "broker").await?;
+        let broker_private_port = env::var("BROKER_PRIVATE_PORT")
+            .expect("Env BROKER_PRIVATE_PORT is not set")
+            .parse()
+            .expect("Env BROKER_PRIVATE_PORT is not a u16");
+        let manager = Self {
+            docker,
+            self_ip,
+            broker_ip,
+            broker_private_port,
+        };
 
         Ok(manager)
     }
@@ -46,6 +58,7 @@ impl DockerManager {
                 "MAX_PLAYER_PER_SERVER={}",
                 env::var("MAX_PLAYER_PER_SERVER").expect("Env MAX_PLAYER_PER_SERVER must be set")
             ),
+            format!("BROKER_URL={}:{}", self.broker_ip, self.broker_private_port),
         ];
 
         let image = env::var("GAME_SERVER_IMAGE").expect("Env GAME_SERVER_IMAGE is not set");
@@ -124,8 +137,8 @@ impl DockerManager {
         Ok(())
     }
 
-    async fn get_container_ip(docker: &Docker) -> Result<String> {
-        let inspect_result = docker.inspect_container("orchestrator", None).await?;
+    async fn get_ip_of_named_container(docker: &Docker, container_name: &str) -> Result<String> {
+        let inspect_result = docker.inspect_container(container_name, None).await?;
 
         if let Some(network_settings) = inspect_result.network_settings {
             if let Some(networks) = network_settings.networks {

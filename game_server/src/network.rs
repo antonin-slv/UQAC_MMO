@@ -1,37 +1,31 @@
 // server/src/network.rs
 
-use std::env;
 use crate::events;
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
-use bytes::Bytes;
-use events::{
-    NetConnexion, NetDisconnection, PlayerConnected, PlayerDisconnected, PlayerInputEvent,
-};
+use bytes::{BufMut, Bytes, BytesMut};
+use events::{PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
+use shared_replication::broker::{
+    BrokerFriends, BrokerMessageHeaders, ClientId, Input, SafeExtract, Topic,
+};
 use shared_replication::client_server::*;
-use shared_replication::{Heartbeat, NetMessages, STREAM_HANDSHAKE, STREAM_INPUTS, ServerInfo};
+use shared_replication::{Heartbeat, STREAM_HANDSHAKE};
+use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
 const INNER_PORT_ENV_NAME: &str = "SERVER_LISTEN_PORT";
-
-const ORCH_URL_ENV_NAME: &str = "ORCHESTRATOR_URL";
+const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
 const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
-
-#[derive(Resource)]
-pub struct NetworkManager {
-    pub peer: GamePeer,
-}
-
 #[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkId(pub u32);
 
 #[derive(Component)]
 pub struct ControlledBy {
-    pub owner_uuid: uuid::Uuid,
+    pub client_id: ClientId,
 }
 
 #[derive(Resource, Default)]
@@ -54,11 +48,12 @@ pub struct ServerStats {
     external_url: String,
     external_port: u16,
     zone: String,
+    pub topic: Topic,
     uuid: uuid::Uuid,
 }
 
 #[derive(Resource)]
-pub struct OrchestratorManager {
+pub struct BrockerManager {
     pub peer: GamePeer,
     pub connection: Option<game_sockets::GameConnection>, // Sera rempli quand le socket quic sera prêt
     pub timer: Timer,
@@ -135,40 +130,34 @@ impl Plugin for NetworkPlugin {
 
         println!("[Server] Server UUID: {}", server_uuid);
 
-        let orchestrator_url = env::var(ORCH_URL_ENV_NAME);
-        let orchestrator_url = match orchestrator_url {
+        let broker_url = env::var(BROKER_URL_ENV_NAME);
+        let broker_url = match broker_url {
             Ok(url) => url,
             Err(_) => panic!(
                 "Error : {} environment variable not set.",
-                ORCH_URL_ENV_NAME
+                BROKER_URL_ENV_NAME
             ),
         };
-        println!("[Server] Orchestrator URL : {}", orchestrator_url);
+        println!("[Server] BROKER URL : {}", broker_url);
 
-        let (orch_ip, orch_port_str) = orchestrator_url.split_once(':').unwrap_or_else(|| {
+        let (broker_ip, broker_port_str) = broker_url.split_once(':').unwrap_or_else(|| {
             panic!(
                 "Error :  {} must be in the format IP:PORT (was {})",
-                ORCH_URL_ENV_NAME, orchestrator_url
+                BROKER_URL_ENV_NAME, broker_url
             )
         });
-        let orch_port: u16 = orch_port_str
+        let brocker_port: u16 = broker_port_str
             .parse()
             .expect("Port de l'orchestrateur invalide");
 
-        let orch_peer = GamePeer::new(QuicBackend::new());
-        orch_peer
-            .connect(orch_ip, orch_port)
+        let brocker_peer = GamePeer::new(QuicBackend::new());
+        brocker_peer
+            .connect(broker_ip, brocker_port)
             .expect("Impossible de configurer le socket vers l'Orchestrateur");
 
-        let client_peer = GamePeer::new(QuicBackend::new());
-        client_peer
-            .listen(&*listen_ip, listen_port)
-            .expect("Impossible de bind le port QUIC");
-
-        app.insert_resource(NetworkManager { peer: client_peer })
-            .insert_resource(NetworkIdGenerator::default())
-            .insert_resource(OrchestratorManager {
-                peer: orch_peer,
+        app.insert_resource(NetworkIdGenerator::default())
+            .insert_resource(BrockerManager {
+                peer: brocker_peer,
                 connection: None,
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
             })
@@ -178,6 +167,7 @@ impl Plugin for NetworkPlugin {
                     zone: "default".to_string(),
                     total_players: 0,
                     max_players,
+                    topic: [0; 32].into(),
                     external_url: listen_ip.to_string(),
                     external_port: listen_port,
                     uuid: server_uuid,
@@ -186,98 +176,25 @@ impl Plugin for NetworkPlugin {
 
         app.add_message::<PlayerConnected>()
             .add_message::<PlayerDisconnected>()
-            .add_message::<PlayerInputEvent>()
-            .add_message::<NetConnexion>()
-            .add_message::<NetDisconnection>();
+            .add_message::<PlayerInputEvent>();
 
-        app.add_systems(
-            PreUpdate,
-            (
-                (orchestrator_bridge_system, network_bridge_system),
-                handle_disconnexions,
-            )
-                .chain(),
-        );
+        app.add_systems(PreUpdate, network_bridge_system);
         app.add_systems(Update, send_heartbeat_system);
 
         println!("\n[Server] Network plugin initialized.\n");
     }
 }
 
-fn handle_disconnexions(
-    mut msg_net_deconnexion: MessageReader<NetDisconnection>,
-    mut msg_disconnect: MessageWriter<PlayerDisconnected>,
-) {
-    for msg in msg_net_deconnexion.read() {
-        println!("Client {} disconnected", msg.client_id);
-        msg_disconnect.write(PlayerDisconnected {
-            client_id: msg.client_id,
-        });
-    }
-}
-
-fn orchestrator_bridge_system(
-    mut orch: ResMut<OrchestratorManager>,
-    mut self_stats : ResMut<ServerStats>,
-) {
-    while let Ok(Some(event)) = orch.peer.poll() {
-        match event {
-            GameNetworkEvent::Connected(conn) => {
-                println!("[Orchestrator] Connected to orchestrator");
-                orch.connection = Some(conn);
-            }
-            GameNetworkEvent::Message {
-                stream,
-                connection,
-                data,
-            } => {
-                println!("[Orchestrator] Received message from orchestrator");
-                // Handle messages from the orchestrator here
-                match stream.real_stream_id() {
-                    STREAM_HANDSHAKE => {
-                        println!("[Orchestrator] Handshake message received");
-                        // Handle handshake messages
-                        if let Ok(msg) = bincode::deserialize::<ServerInfo>(&data) {
-                            self_stats.external_url = msg.ip;
-                            self_stats.external_port = msg.port;
-                            self_stats.zone = msg.zone;
-                            println!(
-                                "[Server] external url is {}:{}",
-                                self_stats.external_url, self_stats.external_port
-                            );
-                            println!("[Server] zone is {}", self_stats.zone);
-                        } else {
-                            eprintln!("[Orchestrator] Failed to deserialize handshake message");
-                        }
-                    }
-                    _ => {
-                        println!(
-                            "[Orchestrator] Received message on stream {}",
-                            stream.real_stream_id()
-                        );
-                    }
-                }
-            }
-
-            GameNetworkEvent::Disconnected { .. } => {
-                println!("[Orchestrator] Disconnected from orchestrator");
-                orch.connection = None;
-            }
-            _ => {}
-        }
-    }
-}
-
 fn send_heartbeat_system(
     time: Res<Time>,
-    mut orch: ResMut<OrchestratorManager>,
+    mut broker: ResMut<BrockerManager>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
 ) {
-    orch.timer.tick(time.delta());
+    broker.timer.tick(time.delta());
 
-    if orch.timer.just_finished() {
-        let Some(conn) = &orch.connection else { return };
+    if broker.timer.just_finished() {
+        let Some(conn) = &broker.connection else { return };
 
         // On construit le payload
         let heartbeat = Heartbeat {
@@ -289,14 +206,22 @@ fn send_heartbeat_system(
 
         // On sérialise en JSON
         if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
-            let data = Bytes::from(json_bytes);
+            let json_bytes = Bytes::from(json_bytes);
+            let data_len = json_bytes.len();
+            let data_len_u8 = (data_len as u16).to_le_bytes() as [u8; 2];
+
+            let mut data = BytesMut::with_capacity(1 + 2 + data_len);
+
+            data.put_u8(BrokerMessageHeaders::Heartbeat as u8);
+            data.put_slice(&data_len_u8);
+            data.put_slice(&json_bytes);
 
             let heartbeat_stream = GameStream::new(
                 shared_replication::STREAM_HEARTBEAT,
                 GameStreamReliability::Unreliable,
             );
 
-            if let Err(e) = orch.peer.send(conn, &heartbeat_stream, data) {
+            if let Err(e) = broker.peer.send(conn, &heartbeat_stream, data.freeze()) {
                 eprintln!("[Server] Erreur d'envoi du heartbeat: {:?}", e);
             } else {
                 println!(
@@ -309,30 +234,21 @@ fn send_heartbeat_system(
 }
 
 fn network_bridge_system(
-    mut net: ResMut<NetworkManager>,
-    mut msg_net_connexion: MessageWriter<NetConnexion>,
-    mut msg_net_deconnexion: MessageWriter<NetDisconnection>,
+    mut broker: ResMut<BrockerManager>,
     mut msg_connected: MessageWriter<PlayerConnected>,
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
 ) {
-    while let Ok(Some(event)) = net.peer.poll() {
+    while let Ok(Some(event)) = broker.peer.poll() {
         match event {
             // 1. Délégation de la gestion des connexions brutes
             GameNetworkEvent::Connected(conn) => {
-                match net.peer
-                    .create_stream(conn, GameStreamReliability::Reliable, STREAM_HANDSHAKE) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("[NetworkBridge] failed to create the Handshake stream {:?}", e);
-                    }
-                }
-
-                route_connection_events(event, &mut msg_net_connexion, &mut msg_net_deconnexion);
+                broker.connection = Some(conn);
             }
 
             GameNetworkEvent::Disconnected(_) => {
-                route_connection_events(event, &mut msg_net_connexion, &mut msg_net_deconnexion);
+                broker.connection = None;
+                panic!("Disconnected from broker (this is bad)");
             }
 
             // 2. Délégation de la gestion des données
@@ -345,6 +261,32 @@ fn network_bridge_system(
                 );
             }
 
+            GameNetworkEvent::StreamCreated(connexion, game_stream) => {
+                println!(
+                    "[Server] Stream créé : Connexion {:?}, Stream {:?}",
+                    connexion, game_stream
+                );
+                match game_stream.real_stream_id() {
+                    STREAM_HANDSHAKE => {
+                        println!("[Server] Handshake stream created by broker (conn: {:?})", connexion);
+                        let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
+                        let friend_type = BrokerFriends::Server as u8;
+                        let mut data = BytesMut::with_capacity(2);
+                        data.put_u8(hello_packet_header);
+                        data.put_u8(friend_type);
+                        broker.peer
+                            .send(&connexion, &game_stream, data.freeze())
+                            .unwrap_or_else(|e| {
+                                eprintln!("Error sending handshake response: {:?}", e);
+                            });
+
+                        println!("[Server] Sent handshake response to broker (conn: {:?})", connexion);
+                    }
+
+                    _ => {}
+                }
+            }
+
             // 3. Gestion des erreurs
             GameNetworkEvent::Error { connection, inner } => {
                 eprintln!(
@@ -355,30 +297,6 @@ fn network_bridge_system(
             // 4. création de streams ???
             _ => {}
         }
-    }
-}
-
-/// Gère uniquement les ouvertures et fermetures de socket QUIC
-fn route_connection_events(
-    event: GameNetworkEvent,
-    msg_connected: &mut MessageWriter<NetConnexion>,
-    msg_disconnected: &mut MessageWriter<NetDisconnection>,
-) {
-    match event {
-        GameNetworkEvent::Connected(conn) => {
-            // Note : À ce stade, le socket est ouvert, mais le joueur n'est pas encore "loggué"
-            println!("[Réseau] Socket ouvert : {}", conn.connection_uuid);
-            msg_connected.write(NetConnexion {
-                client_id: conn.connection_uuid,
-            });
-        }
-        GameNetworkEvent::Disconnected(conn) => {
-            println!("[Réseau] Socket fermé : {}", conn.connection_uuid);
-            msg_disconnected.write(NetDisconnection {
-                client_id: conn.connection_uuid,
-            });
-        }
-        _ => unreachable!(),
     }
 }
 
@@ -398,6 +316,61 @@ fn route_message_events(
         return;
     };
 
+    let discard_message = BrokerMessageHeaders::DiscardedMessageBecauseYouKnow as u8;
+    let header_byte = data.first().unwrap_or(&discard_message);
+    let header = BrokerMessageHeaders::from(*header_byte);
+
+    let process_message = || -> Option<()> {
+        match header {
+            BrokerMessageHeaders::ClientInput => {
+                let client_id = ClientId::extract_from_slice(data.get(1..5)?)?;
+                let input: Input = data.get(5..(5 + 16))?.try_into().ok()?;
+
+                let input = PlayerInput::make_from_u8_slice(input.get(0..2)?)?;
+
+                msg_input.write(PlayerInputEvent {
+                    client_id,
+                    input_data: input,
+                });
+
+                Some(())
+            }
+
+            BrokerMessageHeaders::SpawnClient => {
+                let client_id = ClientId::extract_from_slice(data.get(1..5)?)?;
+                let pseudo_len = data.get(5..6)?.first().cloned()? as usize;
+                let pseudo_end = 6 + pseudo_len;
+                let pseudo = data.get(6..pseudo_end)?;
+
+                let pseudo = std::str::from_utf8(pseudo).ok();
+                let pseudo: String = pseudo.unwrap_or_else(|| "Unknown".into()).to_string();
+
+                msg_connected.write(PlayerConnected {
+                    stream_used: stream,
+                    client_id,
+                    player_name: pseudo,
+                });
+
+                Some(())
+            }
+
+            BrokerMessageHeaders::ClientDisconnect => {
+                _msg_disconnected.write(PlayerDisconnected {
+                    client_id: ClientId::extract_from_slice(data.get(1..5)?)?,
+                });
+                Some(())
+            }
+            _ => None,
+        }
+    };
+
+    let rslt = process_message();
+    if let None = rslt {}
+    {
+        eprintln!("[Server] Une erreure ou un message non reconnu reçu sur le réseau");
+    }
+
+    /*
     let client_uuid = connection.connection_uuid;
 
     match stream.real_stream_id() {
@@ -422,7 +395,6 @@ fn route_message_events(
                     });
                 }
                 Err(e) => eprintln!("Handshake corrompu de {} : {}", client_uuid, e),
-
                 _ => {}
             }
         }
@@ -434,4 +406,5 @@ fn route_message_events(
             );
         }
     }
+     */
 }

@@ -46,15 +46,15 @@ impl RedisManager {
 
         let data = serde_json::to_string(server).map_err(anyhow::Error::msg)?;
 
-        let hot_servers_min: i64 = env::var("HOT_SERVERS_MIN")
-            .expect("Env HOT_SERVERS_MIN is not set")
+        let server_ttl: i64 = env::var("HEARTBEAT_INTERVAL")
+            .expect("Env HEARTBEAT_INTERVAL is not set")
             .parse()
-            .expect("Env HOT_SERVERS_MIN is not an integer");
+            .expect("Env HEARTBEAT_INTERVAL is not an integer");
 
         con.hset("server", server.id.as_str(), data).await?;
         con.hexpire(
             "server",
-            hot_servers_min * 3,
+            server_ttl * 3,
             ExpireOption::NONE,
             server.id.as_str(),
         )

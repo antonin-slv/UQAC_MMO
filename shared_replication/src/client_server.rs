@@ -20,6 +20,17 @@ pub struct PersonalSnapshot {
 pub struct PlayerInput(pub u16);
 
 impl PlayerInput {
+    pub fn make_from_u8_slice(slice: &[u8]) -> Option<Self> {
+        if slice.len() != 2 {
+            return None;
+        }
+        let bytes: [u8; 2] = slice.try_into().ok()?;
+        Some(PlayerInput(u16::from_le_bytes(bytes)))
+    }
+    
+    pub fn to_u8_slice(&self) -> [u8;2] {
+        self.0.to_le_bytes()
+    }
     pub fn get_bit(&self, pos: u8) -> bool {
         (self.0 >> pos) & 1 == 1
     }
