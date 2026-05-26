@@ -10,7 +10,8 @@ use events::{
 };
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
-use shared_replication::{Heartbeat, NetMessages, PlayerInput, ServerInfo, STREAM_HANDSHAKE, STREAM_INPUTS};
+use shared_replication::client_server::*;
+use shared_replication::{Heartbeat, NetMessages, STREAM_HANDSHAKE, STREAM_INPUTS, ServerInfo};
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
 const INNER_PORT_ENV_NAME: &str = "SERVER_LISTEN_PORT";
@@ -98,7 +99,6 @@ impl Plugin for NetworkPlugin {
         };
         println!("[Server] MAX PLAYERS : {}", max_players);
 
-
         let heartbeat_interval = env::var(HEARTBEAT_RATE_ENV_NAME);
 
         let heartbeat_interval = match heartbeat_interval {
@@ -178,8 +178,8 @@ impl Plugin for NetworkPlugin {
                     zone: "default".to_string(),
                     total_players: 0,
                     max_players,
-                    external_url: "".to_string(),
-                    external_port: 0,
+                    external_url: listen_ip.to_string(),
+                    external_port: listen_port,
                     uuid: server_uuid,
                 },
             );
@@ -241,7 +241,10 @@ fn orchestrator_bridge_system(
                             self_stats.external_url = msg.ip;
                             self_stats.external_port = msg.port;
                             self_stats.zone = msg.zone;
-                            println!("[Server] external url is {}:{}", self_stats.external_url, self_stats.external_port);
+                            println!(
+                                "[Server] external url is {}:{}",
+                                self_stats.external_url, self_stats.external_port
+                            );
                             println!("[Server] zone is {}", self_stats.zone);
                         } else {
                             eprintln!("[Orchestrator] Failed to deserialize handshake message");
@@ -279,8 +282,6 @@ fn send_heartbeat_system(
         // On construit le payload
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
-            ip: server_info.external_url.clone(),
-            port: server_info.external_port,
             zone: server_info.zone.clone(),
             player_count: client_directory.sessions.len(),
             max_players: server_info.max_players,
@@ -318,7 +319,19 @@ fn network_bridge_system(
     while let Ok(Some(event)) = net.peer.poll() {
         match event {
             // 1. Délégation de la gestion des connexions brutes
-            GameNetworkEvent::Connected(_) | GameNetworkEvent::Disconnected(_) => {
+            GameNetworkEvent::Connected(conn) => {
+                match net.peer
+                    .create_stream(conn, GameStreamReliability::Reliable, STREAM_HANDSHAKE) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!("[NetworkBridge] failed to create the Handshake stream {:?}", e);
+                    }
+                }
+
+                route_connection_events(event, &mut msg_net_connexion, &mut msg_net_deconnexion);
+            }
+
+            GameNetworkEvent::Disconnected(_) => {
                 route_connection_events(event, &mut msg_net_connexion, &mut msg_net_deconnexion);
             }
 
@@ -405,6 +418,7 @@ fn route_message_events(
                     msg_connected.write(PlayerConnected {
                         client_id: client_uuid,
                         player_name: pseudo,
+                        stream_used: stream,
                     });
                 }
                 Err(e) => eprintln!("Handshake corrompu de {} : {}", client_uuid, e),

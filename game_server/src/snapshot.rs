@@ -1,7 +1,7 @@
 // server/src/snapshot.rs
 use bevy::prelude::*;
 use bytes::Bytes;
-use shared_replication::{EntitySnapshot, PersonalSnapshot};
+use shared_replication::client_server::*;
 use game_sockets::{GameConnection, GameStream, GameStreamReliability};
 use crate::game::{ControlledBy, Player};
 use crate::network::{NetworkManager, NetworkId};

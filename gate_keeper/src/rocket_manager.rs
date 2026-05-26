@@ -3,8 +3,8 @@ use rocket::http::Status;
 use rocket::response::content;
 use rocket::serde::{Deserialize, json::Json};
 use rocket::{Ignite, Rocket, State};
-use serde::Serialize;
 use shared_replication::redis_manager::RedisManager;
+use shared_replication::{ServerInfo, Login, LoginResponse, Register};
 use std::env;
 use std::sync::Arc;
 
@@ -31,28 +31,6 @@ impl RocketManager {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(crate = "rocket::serde")]
-struct Login {
-    username: String,
-    password: String,
-}
-
-#[derive(Serialize)]
-#[serde(crate = "rocket::serde")]
-struct ServerInfo {
-    ip: String,
-    port: u16,
-    zone: String,
-}
-
-#[derive(Serialize)]
-#[serde(crate = "rocket::serde")]
-struct LoginResponse {
-    player_id: String,
-    server: ServerInfo,
-}
-
 #[post("/login", data = "<login>")]
 async fn login(
     database: &State<Arc<DatabaseManager>>,
@@ -68,13 +46,6 @@ async fn login(
     }
 
     get_available_server(redis).await
-}
-
-#[derive(Deserialize)]
-#[serde(crate = "rocket::serde")]
-struct Register {
-    username: String,
-    password: String,
 }
 
 #[post("/register", data = "<register>")]

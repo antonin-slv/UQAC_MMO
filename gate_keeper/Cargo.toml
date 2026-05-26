@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-anyhow = "1.0"
-dotenv = "0.15"
-serde = "1.0"
-rocket = { version = "0.5", features = ["json"] }
+anyhow = { workspace = true }
+dotenv = { workspace = true }
+rocket = { workspace = true }
+shared_replication = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+# Spécifiques au Gatekeeper
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "macros"] }
-shared_replication = { path = "../shared_replication" }
