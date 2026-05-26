@@ -5,12 +5,12 @@ use bevy::asset::Assets;
 use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
-use shared_replication::{NetMessages, STREAM_HANDSHAKE, STREAM_SNAPSHOTS};
+use shared_replication::{STREAM_HANDSHAKE};
 use shared_replication::client_server::*;
-use std::env;
+use shared_replication::broker::{BrokerMessageHeaders, ClientId, SafeExtract};
 
 #[derive(Component)]
 struct NetworkEntity(u32);
@@ -37,13 +37,6 @@ pub struct ClientNetworkPlugin;
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
 
-        let args: Vec<String> = env::args().collect();
-
-        println!("{}", args[1]);
-        let _ip = args[1].clone();
-        println!("{:?}", args[2]);
-        let port = args[2].clone();
-        let _port = port.parse::<u16>().expect("Le port doit être un nombre");
         // On enregistre les systèmes liés aux joueurs
         // 1. Initialisation de la librairie réseau
         let peer = GamePeer::new(QuicBackend::new());
@@ -73,38 +66,38 @@ fn network_bridge_system(
             GameNetworkEvent::Connected(conn) => {
                 println!("[Client] Socket connecté. Attente de la création du stream");
                 server_conn.game_connection = Some(conn.clone());
+
             }
 
             // ÉTAPE 2 & 3 : Réception des messages du serveur
             GameNetworkEvent::Message { stream, data, .. } => {
-                match stream.real_stream_id() {
-                    // --- GESTION DU HANDSHAKE ---
-                    STREAM_HANDSHAKE => match bincode::deserialize::<NetMessages>(&data) {
-                        Ok(NetMessages::WELCOME(welcome)) => {
-                            println!("[Client] Reçu WELCOME : {}", welcome);
-                            if let Ok(client_uuid) = uuid::Uuid::parse_str(&welcome) {
-                                println!("[Client] UUID du joueur : {}", client_uuid);
-                                local_player.net_id = Some(client_uuid);
-                                next_state.set(ClientState::InGame);
-                            }
-                        }
-                        _ => {
-                            println!("Recieved Handshake but could deserialize");
-                        }
-                    },
 
-                    // --- GESTION DES SNAPSHOTS ---
-                    STREAM_SNAPSHOTS => {
-                        // On ignore les données du monde tant qu'on n'est pas officiellement en jeu
-                        //if local_player.net_id.is_some() {
-                            if let Ok(snapshot) = bincode::deserialize::<PersonalSnapshot>(&data) {
-                                msg_snapshot.write(SnapshotMessage(snapshot));
-                            }
-                        //}
+                let discard_message = BrokerMessageHeaders::DiscardedMessageBecauseYouKnow as u8;
+                let header_byte = data.first().unwrap_or(&discard_message);
+                let header = BrokerMessageHeaders::from(*header_byte);
+
+                match header {
+                    BrokerMessageHeaders::Broadcast => {
+                        let data_len : u16 = u16::from_le_bytes(data[1..3].try_into().unwrap_or([0, 0]));
+                        let content = &data[3..(3 + data_len as usize)];
+                        if let Ok(snapshot) = bincode::deserialize::<PersonalSnapshot>(content) {
+                            msg_snapshot.write(SnapshotMessage(snapshot));
+                        } else {
+                            eprintln!("[Client] Erreur de désérialisation du snapshot");
+                        }
                     }
-                    _ => {
-                        println!("[Client] Unknowned stream : {}", stream.real_stream_id());
+                    BrokerMessageHeaders::ClientWelcome => {
+                        let client_id = ClientId::extract_from_slice(&data[1..5]);
+                        if let Some(id) = client_id {
+                            println!("[Client] Bienvenue ! Client ID : {}", id);
+                            local_player.net_id = id;
+                            next_state.set(ClientState::InGame);
+                        } else {
+                            eprintln!("[Client] Erreur lors de l'extraction du Client ID");
+                            next_state.set(ClientState::LoginMenu);
+                        }
                     }
+                    _ => {}
                 }
             }
 
@@ -112,24 +105,31 @@ fn network_bridge_system(
                 println!("[Client] Déconnecté du serveur.");
                 server_conn.game_connection = None;
                 server_conn.handshake_stream = None;
-                local_player.net_id = None; // On repasse en mode "Non connecté"
+                local_player.net_id = 0;
                 next_state.set(ClientState::LoginMenu)
 
             }
 
             GameNetworkEvent::StreamCreated(conn, stream) => {
+
                 println!("[Client] Stream créé : {}", stream.real_stream_id());
                 if stream.real_stream_id() == STREAM_HANDSHAKE {
-                    println!("[Client] Stream de handshake prêt, envois de la requête de connexion");
-                    server_conn.handshake_stream = Some(stream.clone());
-                    // On prépare notre demande de connexion
-                    let join_req = NetMessages::JOIN(local_player.pseudo.clone().unwrap_or("NO_PSEUDO".to_string()));
 
-                    if let Ok(bytes) = bincode::serialize(&join_req) {
-                        let data = Bytes::from(bytes);
+                    let header = BrokerMessageHeaders::ClientHello as u8;
+                    let pseudo = local_player.pseudo.clone().unwrap_or("NO_PSEUDO".to_string());
+                    let pseudo = pseudo.as_bytes();
+                    let pseudo_len = pseudo.len();
+                    let pseudo_u16 = pseudo.len() as u16;
 
-                        let _ = net.peer.send(&conn, &stream, data);
-                    }
+                    let mut hello_packet = BytesMut::with_capacity(1 + 2 + pseudo_len);
+                    hello_packet.put_u8(header);
+                    hello_packet.put_u16_le(pseudo_u16);
+                    hello_packet.put_slice(pseudo);
+
+                    let _ = net.peer.send(&conn, &stream, hello_packet.freeze());
+
+                    println!("[Client] Stream de handshake prêt, requête de connexion envoyée !");
+                    server_conn.handshake_stream = Some(stream);
                 }
             }
             _ => {}
