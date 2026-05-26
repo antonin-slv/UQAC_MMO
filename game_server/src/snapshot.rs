@@ -1,27 +1,36 @@
 // server/src/snapshot.rs
 use bevy::prelude::*;
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use shared_replication::client_server::*;
-use game_sockets::{GameConnection, GameStream, GameStreamReliability};
-use crate::game::{ControlledBy, Player};
-use crate::network::{NetworkManager, NetworkId};
-const AOI_RADIUS: f32 = 100.0;
+use game_sockets::{GameStream, GameStreamReliability};
+use shared_replication::broker::BrokerMessageHeaders;
+//use crate::game::{ControlledBy, Player};
+use crate::network::{NetworkId, BrockerManager, ServerStats};
+const _AOI_RADIUS: f32 = 100.0;
 
 pub struct SnapshotPlugin;
 
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         // todo : mieux controller les moments d'envois de snapshots (actuellement 60 fps -> passer à 20 en tournant entre les clients ?)
-        app.add_systems(PostUpdate, broadcast_aoi_snapshots);
+        app.add_systems(PostUpdate, broadcast_snapshots);
     }
 }
 
-fn broadcast_aoi_snapshots(
-    net: ResMut<NetworkManager>,
-    //todo : Stocker les joueurs dans une hashmap pour éviter le double parcours
-    query_receivers: Query<(&ControlledBy, &Transform), With<Player>>,
+fn broadcast_snapshots(
+    net: ResMut<BrockerManager>,
+    server_data: ResMut<ServerStats>,
     query_all_entities: Query<(&NetworkId, &Transform)>,
 ) {
+    let connexion;
+
+    if let Some(co) = net.connection {
+        connexion = co;
+    } else {
+        eprintln!("Broadcast before connexion with the broker");
+        return;
+    }
+
     let entity_count = query_all_entities.iter().count();
     if entity_count == 0 { return; }
 
@@ -38,36 +47,33 @@ fn broadcast_aoi_snapshots(
 
     let stream = GameStream::new(shared_replication::STREAM_SNAPSHOTS, GameStreamReliability::Unreliable);
 
-    // --- BOUCLE D'ENVOI (Sur les joueurs uniquement) ---
-    for (player_net_id, player_transform) in query_receivers.iter() {
+    let mut personal_snapshot = PersonalSnapshot {
+        entities: Vec::with_capacity(entity_count)
+    };
+    for (target_snapshot, _) in &precomputed_targets {
+        personal_snapshot.entities.push(*target_snapshot);
+    }
 
-        let mut personal_snapshot = PersonalSnapshot {
-            entities: Vec::with_capacity(entity_count)
-        };
 
-        // On filtre ce qui est autour du joueur
-        for (target_snapshot, target_translation) in &precomputed_targets {
-            let distance = player_transform.translation.distance(*target_translation);
+    match bincode::serialize(&personal_snapshot) {
+        Ok(snapshot_as_bytes) => {
+            let publish_head = BrokerMessageHeaders::Publish;
+            //extract topic from server_data
+            let topic = server_data.topic;
+            let data_len = snapshot_as_bytes.len();
+            let data_len_u8 = data_len.to_le_bytes();
+            let mut data = BytesMut::with_capacity(1 + topic.len() + data_len_u8.len() + data_len);
+            data.put_u8(publish_head as u8);
+            data.put_slice(&topic);
+            data.put_slice(&data_len_u8);
+                data.put_slice(&snapshot_as_bytes);
 
-            if distance <= AOI_RADIUS {
-                personal_snapshot.entities.push(*target_snapshot);
+            // Envoi du snapshot !
+
+            if let Err(e) = net.peer.send(&connexion, &stream, data.freeze()) {
+                eprintln!("Erreur d'envoi du snapshot au broker message: {}", e);
             }
         }
-
-        // On sérialise et on envoie avec net_lib
-        match bincode::serialize(&personal_snapshot) {
-            Ok(bytes) => {
-                let data = Bytes::from(bytes);
-
-                // On transforme l'Uuid en GameConnection
-                let conn = GameConnection::from(player_net_id.owner_uuid);
-
-                // Envoi du snapshot !
-                if let Err(e) = net.peer.send(&conn, &stream, data) {
-                    eprintln!("Erreur d'envoi du snapshot à {}: {:?}", player_net_id.owner_uuid, e);
-                }
-            }
-            Err(e) => eprintln!("Erreur de sérialisation bincode: {}", e),
-        }
+        Err(e) => eprintln!("Erreur de sérialisation bincode: {}", e),
     }
 }

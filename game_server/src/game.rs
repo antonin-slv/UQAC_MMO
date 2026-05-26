@@ -4,11 +4,11 @@ use bevy::prelude::*;
 use shared_replication::{NetMessages};
 pub(crate) use crate::network::{NetworkId, ControlledBy, NetworkIdGenerator};
 use crate::events;
-use crate::network::NetworkManager;
+use crate::network::{BrockerManager};
 
 #[derive(Resource, Default)]
 pub struct ClientDirectory {
-    pub sessions: HashMap<uuid::Uuid, Entity>,
+    pub sessions: HashMap<u32, Entity>,
 }
 
 #[derive(Component, Default)]
@@ -25,11 +25,11 @@ pub struct PlayerBundle {
 }
 
 impl PlayerBundle {
-    pub fn new(net_id: u32, connection: uuid::Uuid, position: Vec3) -> Self {
+    pub fn new(net_id: u32, connection: u32, position: Vec3) -> Self {
         Self {
             player: Player::default(),
             net_id: NetworkId(net_id),
-            controlled_by: ControlledBy { owner_uuid: connection }, // On assigne la propriété
+            controlled_by: ControlledBy { client_id: connection }, // On assigne la propriété
             transform: Transform::from_translation(position),
             global_transform: GlobalTransform::default(),
         }
@@ -50,12 +50,14 @@ impl Plugin for GameLogicPlugin {
 }
 
 fn handle_new_players(
-    mut net: ResMut<NetworkManager>,
+    mut net: ResMut<BrockerManager>,
     mut reader: MessageReader<events::PlayerConnected>,
     mut id_gen: ResMut<NetworkIdGenerator>,
     mut commands: Commands,
     mut client_directory: ResMut<ClientDirectory>,
 ) {
+    let Some(conn) = &net.connection else { return };
+
     for msg in reader.read() {
         let net_id = id_gen.next();
         let client_uuid = msg.client_id;
@@ -67,13 +69,12 @@ fn handle_new_players(
 
         if let Ok(bytes) = bincode::serialize(&welcome) {
             let data = bytes.into();
-            // on répond au client sur le même stream (à priori STREAM_INPUT)
-            let target = game_sockets::GameConnection {connection_uuid : client_uuid };
-            let _ = net.peer.send(&target, &msg.stream_used, data);
+            let _ = net.peer.send(conn, &msg.stream_used, data);
 
             println!("[Logic] WELCOME envoyé à {}", client_uuid);
         }
     }
+
 }
 
 fn handle_disconnected(
@@ -112,6 +113,6 @@ fn simulate_game(
 ) {
     for mut transform in query.iter_mut() {
         //todo : faire le jeu
-        transform.translation += Vec3::new(0.0, -0.5, 0.0);
+        transform.translation += Vec3::new(0.0, -0.2, 0.0);
     }
 }

@@ -4,11 +4,13 @@ mod docker_manager;
 
 use crate::docker_manager::DockerManager;
 use anyhow::Result;
+use bytes::{BufMut, BytesMut};
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameNetworkEvent, GamePeer};
+use shared_replication::broker::{BrokerFriends, BrokerMessageHeaders};
 use shared_replication::redis_manager::{GameServer, RedisManager};
-use shared_replication::{Heartbeat, STREAM_HEARTBEAT};
+use shared_replication::{Heartbeat, STREAM_HANDSHAKE};
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -40,15 +42,15 @@ async fn main() -> Result<()> {
 
     let redis_heartbeat = Arc::clone(&redis);
 
+    let temp_docker = Arc::clone(&docker);
+
     let heartbeat_handle = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(1));
 
         let mut peer = GamePeer::new(QuicBackend::new());
+        peer.connect(temp_docker.broker_ip.as_str(), temp_docker.broker_private_port).expect("Couldn't connect to Broker");
 
-        peer.listen(&"0.0.0.0", orchestrator_port)
-            .expect("Cannot create socket");
-
-        println!("Orchestrator listening to 0.0.0.0:{}", orchestrator_port);
+        println!("Orchestrator connected to Broker at {}:{}", temp_docker.broker_ip, temp_docker.broker_private_port);
 
         loop {
             ticker.tick().await;
@@ -107,7 +109,7 @@ async fn main() -> Result<()> {
 
 async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<GameServer> {
     let new_server_id = Uuid::new_v4();
-
+    println!("Spawning new server with id {}", new_server_id);
     let port = docker.spawn_container(new_server_id.to_string()).await?;
 
     let server = redis.create_server(new_server_id.to_string(), port).await?;
@@ -122,15 +124,57 @@ async fn listen_heartbeat(peer: &mut GamePeer, redis: &RedisManager) -> Result<(
                 connection,
                 stream,
                 data,
-            } => match stream.real_stream_id() {
-                STREAM_HEARTBEAT => match serde_json::from_slice::<Heartbeat>(&data) {
-                    Ok(heartbeat) => on_heartbeat_received(&redis, heartbeat).await?,
-                    Err(e) => {
-                        eprintln!("Invalid heartbeat {} : {}", connection.connection_uuid, e)
+            } => {
+                let discard_message = BrokerMessageHeaders::DiscardedMessageBecauseYouKnow as u8;
+                let header_byte = data.first().unwrap_or(&discard_message);
+                let header = BrokerMessageHeaders::from(*header_byte);
+                match header {
+                    BrokerMessageHeaders::Heartbeat => {
+                        let heartbeat_len = data
+                            .get(1..3)
+                            .unwrap_or_default()
+                            .try_into()
+                            .unwrap_or([0, 0]);
+                        let heartbeat_len = u16::from_le_bytes(heartbeat_len) as usize;
+
+                        let heartbeat_playload =
+                            data.get(3..(3 + heartbeat_len)).unwrap_or_default();
+
+                        match serde_json::from_slice::<Heartbeat>(heartbeat_playload) {
+                            Ok(heartbeat) => on_heartbeat_received(&redis, heartbeat).await?,
+                            Err(e) => {
+                                eprintln!(
+                                    "Invalid heartbeat {} : {}",
+                                    connection.connection_uuid, e
+                                )
+                            }
+                        }
                     }
-                },
-                _ => {}
-            },
+                    _ => {}
+                }
+            }
+            GameNetworkEvent::StreamCreated(connexion, game_stream) => {
+                println!("[Orchestrator] Stream created from {:?} with id {:?}", connexion, game_stream);
+                match game_stream.real_stream_id() {
+                    STREAM_HANDSHAKE => {
+                        println!("[Orchestrator] Received handshake stream from {:?}", connexion);
+                        let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
+                        let friend_type = BrokerFriends::Orchestrator as u8;
+                        let mut data = BytesMut::with_capacity(2);
+                        data.put_u8(hello_packet_header);
+                        data.put_u8(friend_type);
+                        peer.send(&connexion, &game_stream, data.freeze())
+                            .unwrap_or_else(|e| {
+                                eprintln!("Error sending handshake response: {:?}", e);
+                            });
+
+                        println!("[Orchestrator] Sent handshake response to {:?}", connexion);
+                    }
+
+                    _ => {}
+                }
+            }
+
             _ => {}
         }
     }
@@ -139,12 +183,14 @@ async fn listen_heartbeat(peer: &mut GamePeer, redis: &RedisManager) -> Result<(
 }
 
 async fn on_heartbeat_received(redis: &RedisManager, heartbeat: Heartbeat) -> Result<()> {
+    let hid= heartbeat.id.clone();
     let server = redis.get_server(heartbeat.id).await?;
     if let Some(mut server) = server {
         server.players_online = heartbeat.player_count as u32;
         redis.update_server(&server).await?;
     } else {
-        eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là")
+        eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là");
+        eprintln!("\t bad heartbeat id : {}", hid)
     }
 
     Ok(())

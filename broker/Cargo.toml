@@ -6,11 +6,6 @@ edition = "2024"
 [dependencies]
 dotenv = { workspace = true }
 game_sockets = { workspace = true }
-tokio = { workspace = true}
 bytes = { workspace = true }
-
-anyhow = { workspace = true }
-bincode = { workspace = true }
 shared_replication = { workspace = true }
-uuid = { version = "1.23.1", features = ["v4"] }
-dashmap = "7.0.0-rc2"
+rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
