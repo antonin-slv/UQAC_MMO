@@ -11,10 +11,6 @@ impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
-
-    pub fn zero() -> Self {
-        Self::new(0.0, 0.0)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,12 +79,12 @@ impl Entity {
 
 pub struct QuadTree {
     pub bounds: Rect,
-    depth: u8,
-    max_depth: u8,
-    capacity: usize,
-    entities: Vec<Entity>,
-    children: Option<Box<[QuadTree; 4]>>,
-    shard_id: u32,
+    pub depth: u8,
+    pub max_depth: u8,
+    pub capacity: usize,
+    pub entities: Vec<Entity>,
+    pub children: Option<Box<[QuadTree; 4]>>,
+    pub shard_id: u32,
 }
 
 impl QuadTree {
@@ -216,7 +212,7 @@ impl QuadTree {
         self.children = Some(children);
     }
 
-    fn merge(&mut self, shard_id: u32, shard_manager: &mut ShardManager) {
+    fn try_merge(&mut self, shard_id: u32, shard_manager: &mut ShardManager) -> bool {
         if let Some(children) = self.children.as_mut() {
             let child_id = ((shard_id >> self.depth * 2) & 3) as usize;
             if children[child_id].shard_id == shard_id && self.depth > 0 {
@@ -225,21 +221,34 @@ impl QuadTree {
                     entity_count += child.entities.len();
                 }
 
-                if entity_count < 4 {
-                    for child in children.iter_mut() {
-                        for entity in child.entities.iter_mut() {
-                            shard_manager.on_entity_move(self.shard_id, entity.id);
-                            self.entities.push(*entity);
-                        }
-
-                        shard_manager.on_shard_destroyed(child.shard_id);
-                    }
-
-                    self.children = None;
+                if entity_count < self.capacity {
+                    self.merge(shard_manager);
+                    return true;
                 }
             } else {
-                children[child_id].merge(shard_id, shard_manager);
+                return children[child_id].try_merge(shard_id, shard_manager);
             }
+        }
+
+        false
+    }
+
+    fn merge(&mut self, shard_manager: &mut ShardManager) {
+        if let Some(children) = self.children.as_mut() {
+            let mut destroyed_shards: Vec<u32> = Vec::new();
+            for child in children.iter_mut() {
+                for entity in child.entities.iter_mut() {
+                    shard_manager.on_entity_move(self.shard_id, entity.id);
+                    self.entities.push(*entity);
+                }
+
+                destroyed_shards.push(child.shard_id)
+            }
+            shard_manager.on_shard_destroyed(destroyed_shards);
+
+            self.children = None;
+
+            self.try_merge(self.shard_id, shard_manager);
         }
     }
 
@@ -273,15 +282,18 @@ impl QuadTree {
     }
 
     pub fn move_entity(&mut self, entity: Entity, shard_manager: &mut ShardManager) {
-        let current_shard_id = shard_manager.get_shard(entity.id);
-        if let Some(current_shard_id) = current_shard_id {
-            self.remove_entity(entity, current_shard_id, shard_manager)
+        let old_shard_id = shard_manager.get_shard(entity.id);
+        if let Some(old_shard_id) = old_shard_id {
+            self.remove_entity(entity, old_shard_id, shard_manager)
         }
 
         self.insert(entity, shard_manager);
 
-        if let Some(old_shard_id) = current_shard_id {
-            self.merge(old_shard_id, shard_manager);
+        if let Some(old_shard_id) = old_shard_id
+            && let Some(current_shard_id) = shard_manager.get_shard(entity.id)
+            && old_shard_id != current_shard_id
+        {
+            self.try_merge(old_shard_id, shard_manager);
         }
     }
 
@@ -294,76 +306,6 @@ impl QuadTree {
         let entity_pos = self.entities.iter().position(|e| e.id == entity.id);
         if let Some(entity_pos) = entity_pos {
             self.entities.swap_remove(entity_pos);
-        }
-    }
-
-    pub fn _print_tree(&self) {
-        println!("QuadTree Root");
-        self._print_internal(String::new(), true);
-    }
-
-    fn _print_internal(&self, prefix: String, is_last: bool) {
-        let branch = if is_last { "└── " } else { "├── " };
-
-        let bounds_str = format!(
-            "[{:.0},{:.0} -> {:.0},{:.0}]",
-            self.bounds.min_x, self.bounds.min_y, self.bounds.max_x, self.bounds.max_y
-        );
-
-        let mut info = format!(
-            "{} (Depth: {} | Shard ID : {}",
-            bounds_str, self.depth, self.shard_id
-        );
-        if self.children.is_some() {
-            info.push_str(&format!(
-                ", Shard ID: {}, Entities: {})",
-                self.shard_id,
-                self.entities.len()
-            ));
-        } else {
-            info.push_str(")");
-        }
-
-        println!("{}{}{}", prefix, branch, info);
-
-        if let Some(children) = &self.children {
-            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
-
-            for (i, child) in children.iter().enumerate() {
-                let is_last_child = i == children.len() - 1;
-
-                let quad_name = match i {
-                    0 => "SW: ",
-                    1 => "SE: ",
-                    2 => "NW: ",
-                    _ => "NE: ",
-                };
-
-                print!(
-                    "{}{}",
-                    new_prefix,
-                    if is_last_child {
-                        "└── "
-                    } else {
-                        "├── "
-                    }
-                );
-                print!("{}", quad_name);
-
-                let child_prefix = format!(
-                    "{}{}",
-                    new_prefix,
-                    if is_last_child { "    " } else { "│   " }
-                );
-
-                child._print_internal(child_prefix, true);
-            }
-        } else {
-            let mut entities = String::new();
-            for entity in self.entities.iter() {
-                entities.push_str(format!("{} / ", entity.id).as_str());
-            }
-            print!("{}{}\n", prefix, entities);
         }
     }
 }

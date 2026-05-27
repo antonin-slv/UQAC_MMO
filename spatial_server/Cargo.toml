@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 dotenv = { workspace = true }
+bevy = { workspace = true }
+rand = "0.10"
+bevy_text_gizmos = "0.3"
