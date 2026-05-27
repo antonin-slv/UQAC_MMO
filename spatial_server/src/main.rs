@@ -1,56 +1,27 @@
-use crate::quadtree::{Entity, QuadTree, Rect, Vec2};
+use crate::quadtree::{Entity, QuadTree, Vec2};
+use crate::shard_manager::ShardManager;
 use dotenv::dotenv;
-use rand::RngExt;
-use std::env;
 
 mod quadtree;
+mod shard_manager;
 
 fn main() {
     dotenv().ok();
 
-    let mut world_size: f32 = env::var("WORLD_SIZE")
-        .expect("Env WORLD_SIZE is not set")
-        .parse()
-        .expect("Env WORLD_SIZE is not a number");
-    world_size /= 2.0;
-    let map_size = Rect {
-        min_x: -world_size,
-        max_x: world_size,
-        min_y: -world_size,
-        max_y: world_size,
-    };
+    let mut shard_manager = ShardManager::new();
+    let mut quad_tree = QuadTree::new(&mut shard_manager);
 
-    let quadtree_capacity = env::var("QUADTREE_CAPACITY")
-        .expect("Env QUADTREE_CAPACITY is not set")
-        .parse()
-        .expect("Env QUADTREE_CAPACITY is not a number");
+    let entities = vec![
+        Entity::new(3630, Vec2::new(75.0, 150.0)),
+        Entity::new(67, Vec2::new(150.0, 150.0)),
+        Entity::new(69, Vec2::new(225.0, 150.0)),
+        Entity::new(3630, Vec2::new(-150.0, 150.0)),
+    ];
 
-    let max_depth = env::var("QUADTREE_MAX_DEPTH")
-        .expect("Env QUADTREE_MAX_DEPTH is not set")
-        .parse()
-        .expect("Env QUADTREE_MAX_DEPTH is not a number");
-
-    let mut quad_tree = QuadTree::new(map_size, quadtree_capacity, max_depth);
-
-    let entity_id = 12131u32;
-    let entity_position = Vec2 { x: 2326., y: 6161. };
-    quad_tree.insert(Entity::new(entity_id, entity_position));
-
-    let mut rng = rand::rng();
-
-    for _ in 1..1000 {
-        let entity_position = Vec2 {
-            x: rng.random_range(map_size.min_x..map_size.max_x),
-            y: rng.random_range(map_size.min_y..map_size.max_y),
-        };
-        quad_tree.insert(Entity::new(rng.random(), entity_position));
+    for entity in entities {
+        quad_tree.move_entity(entity, &mut shard_manager);
+        quad_tree._print_tree();
     }
 
-    if let Some(shard_id) = quad_tree.shard_for(entity_position) {
-        println!("Shard for {:?}", shard_id);
-    }
-
-    println!("{:?}", quad_tree.shards_near(entity_position, 10.0));
-
-    quad_tree.print_tree()
+    println!("{:?}", quad_tree.shards_near(Vec2::zero(), 150.0));
 }
