@@ -1,27 +1,26 @@
 ﻿use crate::{PlayerBundle};
+use crate::structs::{ClientState, LocalPlayer};
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
-use bevy::prelude::{Circle, ColorMaterial, Commands, Component, Entity, MeshMaterial2d, Message, MessageReader, MessageWriter, Query, ResMut, Resource, Transform};
+use bevy::prelude::*;
 use bytes::Bytes;
 use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
-use shared_replication::NetMessages::WELCOME;
-use shared_replication::{NetMessages, PersonalSnapshot, STREAM_HANDSHAKE, STREAM_SNAPSHOTS};
+use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
+use shared_replication::{NetMessages, STREAM_HANDSHAKE, STREAM_SNAPSHOTS};
+use shared_replication::client_server::*;
 use std::env;
-#[derive(Resource, Default)]
-struct LocalPlayer {
-    // Vaut 'None' tant qu'on n'a pas reçu le WELCOME
-    pub net_id: Option<uuid::Uuid>,
-}
 
 #[derive(Component)]
 struct NetworkEntity(u32);
 
 // Pour stocker la connexion au serveur (pour savoir à qui envoyer nos inputs)
 #[derive(Resource, Default)]
-pub(crate) struct ServerConnection(pub(crate) Option<GameConnection>);
+pub(crate) struct ServerConnection{
+    pub(crate) game_connection: Option<GameConnection>,
+    pub(crate) handshake_stream: Option<GameStream>,
+}
 
 // Notre Message Bevy pour les snapshots
 #[derive(Message)]
@@ -41,25 +40,21 @@ impl Plugin for ClientNetworkPlugin {
         let args: Vec<String> = env::args().collect();
 
         println!("{}", args[1]);
-        let ip = args[1].clone();
+        let _ip = args[1].clone();
         println!("{:?}", args[2]);
         let port = args[2].clone();
-        let port = port.parse::<u16>().expect("Le port doit être un nombre");
+        let _port = port.parse::<u16>().expect("Le port doit être un nombre");
         // On enregistre les systèmes liés aux joueurs
         // 1. Initialisation de la librairie réseau
         let peer = GamePeer::new(QuicBackend::new());
-
-        println!("[Client] Connexion au serveur...");
-        peer.connect(ip.as_str(), port)
-            .expect("Impossible de se connecter");
 
         app.insert_resource(NetworkManager { peer })
             .insert_resource(ServerConnection::default())
             .insert_resource(LocalPlayer::default())
             // "event" réception de snapshot
             .add_message::<SnapshotMessage>()
-            .add_systems(PreUpdate, network_bridge_system)
-            .add_systems(Update, process_snapshots);
+            .add_systems(PreUpdate, network_bridge_system.run_if(in_state(ClientState::Connecting).or(in_state(ClientState::InGame))))
+            .add_systems(Update, process_snapshots.run_if(in_state(ClientState::InGame)));
     }
 }
 
@@ -70,50 +65,42 @@ fn network_bridge_system(
     mut server_conn: ResMut<ServerConnection>,
     mut local_player: ResMut<LocalPlayer>, // On injecte notre nouvelle ressource
     mut msg_snapshot: MessageWriter<SnapshotMessage>,
+    mut next_state: ResMut<NextState<ClientState>>,
 ) {
     while let Ok(Some(event)) = net.peer.poll() {
         match event {
             // ÉTAPE 1 : Le socket QUIC/UDP est ouvert
             GameNetworkEvent::Connected(conn) => {
-                println!("[Client] Socket connecté. Envoi de la requête de jointure...");
-                server_conn.0 = Some(conn.clone());
-
-                // On prépare notre demande de connexion
-                let join_req = NetMessages::JOIN("Antonin".to_string());
-
-                if let Ok(bytes) = bincode::serialize(&join_req) {
-                    let data = Bytes::from(bytes);
-                    // todo : make this reliable
-                    let stream =
-                        GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
-                    let _ = net.peer.send(&conn, &stream, data);
-                }
+                println!("[Client] Socket connecté. Attente de la création du stream");
+                server_conn.game_connection = Some(conn.clone());
             }
 
             // ÉTAPE 2 & 3 : Réception des messages du serveur
             GameNetworkEvent::Message { stream, data, .. } => {
-                // N'oublie pas ton correctif .get_id() pour le bitmask !
                 match stream.real_stream_id() {
                     // --- GESTION DU HANDSHAKE ---
                     STREAM_HANDSHAKE => match bincode::deserialize::<NetMessages>(&data) {
-                        Ok(WELCOME(welcome)) => {
+                        Ok(NetMessages::WELCOME(welcome)) => {
                             println!("[Client] Reçu WELCOME : {}", welcome);
                             if let Ok(client_uuid) = uuid::Uuid::parse_str(&welcome) {
                                 println!("[Client] UUID du joueur : {}", client_uuid);
                                 local_player.net_id = Some(client_uuid);
+                                next_state.set(ClientState::InGame);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            println!("Recieved Handshake but could deserialize");
+                        }
                     },
 
                     // --- GESTION DES SNAPSHOTS ---
                     STREAM_SNAPSHOTS => {
                         // On ignore les données du monde tant qu'on n'est pas officiellement en jeu
-                        if local_player.net_id.is_some() {
+                        //if local_player.net_id.is_some() {
                             if let Ok(snapshot) = bincode::deserialize::<PersonalSnapshot>(&data) {
                                 msg_snapshot.write(SnapshotMessage(snapshot));
                             }
-                        }
+                        //}
                     }
                     _ => {
                         println!("[Client] Unknowned stream : {}", stream.real_stream_id());
@@ -123,8 +110,27 @@ fn network_bridge_system(
 
             GameNetworkEvent::Disconnected(_) => {
                 println!("[Client] Déconnecté du serveur.");
-                server_conn.0 = None;
+                server_conn.game_connection = None;
+                server_conn.handshake_stream = None;
                 local_player.net_id = None; // On repasse en mode "Non connecté"
+                next_state.set(ClientState::LoginMenu)
+
+            }
+
+            GameNetworkEvent::StreamCreated(conn, stream) => {
+                println!("[Client] Stream créé : {}", stream.real_stream_id());
+                if stream.real_stream_id() == STREAM_HANDSHAKE {
+                    println!("[Client] Stream de handshake prêt, envois de la requête de connexion");
+                    server_conn.handshake_stream = Some(stream.clone());
+                    // On prépare notre demande de connexion
+                    let join_req = NetMessages::JOIN(local_player.pseudo.clone().unwrap_or("NO_PSEUDO".to_string()));
+
+                    if let Ok(bytes) = bincode::serialize(&join_req) {
+                        let data = Bytes::from(bytes);
+
+                        let _ = net.peer.send(&conn, &stream, data);
+                    }
+                }
             }
             _ => {}
         }

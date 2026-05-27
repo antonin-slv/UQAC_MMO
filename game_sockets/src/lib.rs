@@ -156,11 +156,11 @@ impl GamePeer {
         self.send_cmd(BackendCommand::Connect { addr: addr.to_string(), port })
     }
 
-    pub fn create_stream(&mut self, conn: GameConnection, reliability: GameStreamReliability) -> Result<(), GameSocketError> {
-        self.next_stream_id += 1;
+    pub fn create_stream(&mut self, conn: GameConnection, reliability: GameStreamReliability, stream_id: u16) -> Result<(), GameSocketError> {
+        //self.next_stream_id += 1;
         self.send_cmd(BackendCommand::CreateStream {
             connection: conn.connection_uuid,
-            stream: self.next_stream_id,
+            stream: stream_id, //modifs
             reliability
         })
     }

@@ -1,10 +1,14 @@
 mod network;
 mod structs;
+mod launcher;
 
 use bevy::prelude::*;
 use bytes::Bytes;
-use shared_replication::{PlayerInput, STREAM_INPUTS};
+use shared_replication::{STREAM_INPUTS};
+use shared_replication::client_server::*;
 use game_sockets::{ GameStream, GameStreamReliability };
+use crate::launcher::LauncherPlugin;
+use crate::structs::ClientState;
 
 #[derive(Bundle)]
 pub struct CameraBundle {
@@ -24,9 +28,11 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(network::ClientNetworkPlugin)
+        .add_plugins(LauncherPlugin)
+        .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
         // Systèmes
         .add_systems(Startup, setup_graphics)
-        .add_systems(Update, capture_inputs)
+        .add_systems(FixedUpdate, capture_inputs.run_if(in_state(ClientState::InGame)))
         .run();
     //todo : tenter d'envoyer un message de déconnexion (permettra d'un peu limiter la charge serveur) -> soit event soit à la fin de run.
 }
@@ -44,15 +50,15 @@ fn capture_inputs(
     server_conn: Res<network::ServerConnection>,
 ) {
     // Si on n'est pas encore connecté, on ne fait rien
-    let Some(conn) = server_conn.0 else { return };
+    let Some(conn) = server_conn.game_connection else { return };
 
     let mut current_input = PlayerInput::default();
 
-    if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::KeyZ) { current_input.up = true; }
-    if keyboard_input.pressed(KeyCode::KeyS) { current_input.down = true; }
-    if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::KeyQ) { current_input.left = true; }
-    if keyboard_input.pressed(KeyCode::KeyD) { current_input.right = true; }
-
+    if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::KeyZ) { current_input.set_up(true); }
+    if keyboard_input.pressed(KeyCode::KeyS) { current_input.set_down(true); }
+    if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::KeyQ) { current_input.set_left(true); }
+    if keyboard_input.pressed(KeyCode::KeyD) { current_input.set_right(true); }
+    
     // On prépare le flux (Unreliable pour les inputs)
     let stream = GameStream::new(STREAM_INPUTS, GameStreamReliability::Unreliable);
 
@@ -63,5 +69,8 @@ fn capture_inputs(
         if let Err(e) = net.peer.send(&conn, &stream, data) {
             eprintln!("Erreur lors de l'envoi des inputs: {:?}", e);
         }
+
+    } else {
+        eprintln!("Erreur lors de l'envoi des inputs");
     }
 }

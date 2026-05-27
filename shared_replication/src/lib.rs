@@ -2,35 +2,14 @@
 use serde::{Deserialize, Serialize};
 
 pub mod redis_manager;
-// -- les différents streams de données
+pub mod client_server;
 
 pub const STREAM_HANDSHAKE: u16 = 0;
-pub const STREAM_SNAPSHOTS: u16 = 1;
-pub const STREAM_INPUTS: u16    = 2;
-pub const STREAM_HEARTBEAT: u16 = 3;
+pub const STREAM_SNAPSHOTS: u16 = 100;
+pub const STREAM_INPUTS: u16 = 101;
+pub const STREAM_HEARTBEAT: u16 = 102;
 
 
-//
-// CLIENT SERVER COMMUNICATION
-//
-#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
-pub struct EntitySnapshot {
-    pub network_id: u32,
-    pub position: [f32; 2],
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PersonalSnapshot {
-    pub entities: Vec<EntitySnapshot>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-pub struct PlayerInput {
-    pub up: bool,
-    pub down: bool,
-    pub left: bool,
-    pub right: bool,
-}
 
 //
 // SERVER - ORCHESTRATOR COMMUNICATION
@@ -39,16 +18,14 @@ pub struct PlayerInput {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Heartbeat {
     pub id: String,
-    pub ip: String,
-    pub port: u16,
     pub zone: String,
     pub player_count: usize,
     pub max_players: usize,
 }
 
-
-//Data of the server... This is passed by the Orchestrator to game servers by environnement variables.
+//Data of the server
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(crate = "rocket::serde")]
 pub struct ServerInfo {
     pub ip: String,
     pub port: u16,
@@ -60,7 +37,29 @@ pub struct ServerInfo {
 //
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NetMessages {
-    JOIN(String), //sent by a client to join a server,
-    WELCOME(String), //Server welcomes client with the uuid of the client
+    JOIN(String),         //sent by a client to join a server,
+    WELCOME(String),      //Server welcomes client with the uuid of the client
     HEARTBEAT(Heartbeat), //server send this to the orchestrator
+}
+
+// Client + Gatekeeper
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct Login {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct Register {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct LoginResponse {
+    pub player_id: String,
+    pub server: ServerInfo,
 }
