@@ -18,7 +18,7 @@ pub struct Rect {
     pub max_y: f32,
 }
 
-pub type OwnedArea = (Rect, Vec<Vec2>);
+pub type OwnedArea = (u32, Vec<Rect>);
 
 impl Rect {
     pub fn contains(&self, p: Vec2) -> bool {
