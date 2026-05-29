@@ -1,17 +1,16 @@
 use crate::quadtree;
 use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
+use bevy::DefaultPlugins;
 use bevy::app::{App, Startup, Update};
 use bevy::camera::Camera2d;
 use bevy::color::{Color, Srgba};
 use bevy::input::ButtonInput;
 use bevy::math::{Isometry2d, Rot2, Vec2};
-use bevy::prelude::{
-    Commands, Component, Gizmos, KeyCode, Query, Res, ResMut, Resource, Time,
-};
-use bevy::DefaultPlugins;
+use bevy::prelude::{Commands, Component, Gizmos, KeyCode, Query, Res, ResMut, Resource, Time};
 use bevy_text_gizmos::TextGizmos;
 use rand::RngExt;
+pub(crate) use shared_replication::math::Rect;
 use std::env;
 
 #[derive(Resource)]
@@ -41,25 +40,11 @@ pub fn start_renderer(shard_manager: ShardManager, quad_tree: QuadTree) {
 fn setup(mut commands: Commands) {
     commands.spawn(Camera2d);
     let mut rng = rand::rng();
-    let mut world_size: f32 = env::var("WORLD_SIZE")
-        .expect("Env WORLD_SIZE is not set")
-        .parse()
-        .expect("Env WORLD_SIZE is not a number");
-    world_size /= 2.0;
-    let map_size = quadtree::Rect {
-        min_x: -world_size,
-        max_x: world_size,
-        min_y: -world_size,
-        max_y: world_size,
-    };
-    for _ in 0..3 {
+    for i in 0..3 {
         commands.spawn(Player {
             entity: Entity::new(
                 rng.random(),
-                quadtree::Vec2::new(
-                    rng.random_range(map_size.min_x..map_size.max_x),
-                    rng.random_range(map_size.min_y..map_size.max_y),
-                ),
+                shared_replication::math::Vec2::new((i * 10) as f32, (i * 10) as f32),
             ),
         });
     }
@@ -89,7 +74,7 @@ fn movement(
         .parse()
         .expect("Env WORLD_SIZE is not a number");
     world_size /= 2.0;
-    let map_size = quadtree::Rect {
+    let map_size = Rect {
         min_x: -world_size,
         max_x: world_size,
         min_y: -world_size,
@@ -141,7 +126,7 @@ fn draw_quadtree(gizmos: &mut Gizmos, quad_tree: &QuadTree) {
         gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
         gizmos.text_2d(
             start,
-            format!("{}", quad_tree.depth).as_str(),
+            format!("{}", quad_tree.shard_id).as_str(),
             16.0 - quad_tree.depth as f32,
             Vec2::ZERO,
             Color::WHITE,

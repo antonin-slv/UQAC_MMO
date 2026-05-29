@@ -6600,6 +6600,7 @@ dependencies = [
  "bevy_text_gizmos",
  "dotenv",
  "rand 0.10.1",
+ "shared_replication",
 ]
 
 [[package]]

@@ -1,69 +1,6 @@
 use crate::shard_manager::ShardManager;
+pub(crate) use shared_replication::math::{Rect, Vec2};
 use std::env;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Vec2 {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rect {
-    pub min_x: f32,
-    pub min_y: f32,
-    pub max_x: f32,
-    pub max_y: f32,
-}
-
-impl Rect {
-    pub fn contains(&self, p: Vec2) -> bool {
-        p.x >= self.min_x && p.x <= self.max_x && p.y >= self.min_y && p.y <= self.max_y
-    }
-
-    pub fn sqr_distance_to_point(&self, p: Vec2) -> f32 {
-        let dx = (self.min_x - p.x).max(0.0).max(p.x - self.max_x);
-        let dy = (self.min_y - p.y).max(0.0).max(p.y - self.max_y);
-        dx * dx + dy * dy
-    }
-
-    pub fn split(&self) -> [Rect; 4] {
-        let mid_x = (self.min_x + self.max_x) / 2.0;
-        let mid_y = (self.min_y + self.max_y) / 2.0;
-
-        [
-            Rect {
-                min_x: self.min_x,
-                max_x: mid_x,
-                min_y: self.min_y,
-                max_y: mid_y,
-            },
-            Rect {
-                min_x: mid_x,
-                max_x: self.max_x,
-                min_y: self.min_y,
-                max_y: mid_y,
-            },
-            Rect {
-                min_x: self.min_x,
-                max_x: mid_x,
-                min_y: mid_y,
-                max_y: self.max_y,
-            },
-            Rect {
-                min_x: mid_x,
-                max_x: self.max_x,
-                min_y: mid_y,
-                max_y: self.max_y,
-            },
-        ]
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
@@ -111,8 +48,7 @@ impl QuadTree {
             .parse()
             .expect("Env QUADTREE_CAPACITY is not a number");
 
-        let mut quadtree =
-            Self::new_internal(map_size, 0, max_depth, quadtree_capacity, 0, shard_manager);
+        let mut quadtree = Self::new_internal(map_size, 0, max_depth, quadtree_capacity, 0);
 
         quadtree.subdivide(shard_manager);
 
@@ -125,9 +61,7 @@ impl QuadTree {
         max_depth: u8,
         capacity: usize,
         shard_id: u32,
-        shard_manager: &mut ShardManager,
     ) -> Self {
-        shard_manager.on_new_shard(shard_id);
         Self {
             bounds,
             depth,
@@ -166,38 +100,36 @@ impl QuadTree {
     fn subdivide(&mut self, shard_manager: &mut ShardManager) {
         let sub_bounds = self.bounds.split();
 
+        let shard_ids = self.generate_shard_id();
+
         let mut children = Box::new([
             QuadTree::new_internal(
                 sub_bounds[0],
                 self.depth + 1,
                 self.max_depth,
                 self.capacity,
-                self.generate_shard_id(0),
-                shard_manager,
+                shard_ids.get(0).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[1],
                 self.depth + 1,
                 self.max_depth,
                 self.capacity,
-                self.generate_shard_id(1),
-                shard_manager,
+                shard_ids.get(1).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[2],
                 self.depth + 1,
                 self.max_depth,
                 self.capacity,
-                self.generate_shard_id(2),
-                shard_manager,
+                shard_ids.get(2).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[3],
                 self.depth + 1,
                 self.max_depth,
                 self.capacity,
-                self.generate_shard_id(3),
-                shard_manager,
+                shard_ids.get(3).cloned().unwrap_or_default(),
             ),
         ]);
 
@@ -208,6 +140,8 @@ impl QuadTree {
                 }
             }
         }
+
+        shard_manager.on_new_shard(shard_ids);
 
         self.children = Some(children);
     }
@@ -230,6 +164,7 @@ impl QuadTree {
             }
         }
 
+        println!("Feur");
         false
     }
 
@@ -252,33 +187,16 @@ impl QuadTree {
         }
     }
 
-    fn generate_shard_id(&mut self, children_id: u8) -> u32 {
+    fn generate_shard_id(&mut self) -> Vec<u32> {
+        let mut shard_ids: Vec<u32> = Vec::new();
         let offset = self.depth * 2;
-        let mut next_id = children_id as u32;
-        next_id = next_id << offset;
-        next_id |= self.shard_id;
-        next_id
-    }
-
-    pub fn shards_near(&self, pos: Vec2, margin: f32) -> Vec<u32> {
-        let mut results = Vec::new();
-        self.collect_shards_near(pos, margin * margin, &mut results);
-        results.sort_unstable();
-        results.dedup();
-        results
-    }
-
-    fn collect_shards_near(&self, pos: Vec2, margin_sqr: f32, results: &mut Vec<u32>) {
-        if self.bounds.sqr_distance_to_point(pos) > margin_sqr {
-            return;
+        for i in 0..4 {
+            let mut child_id = i;
+            child_id = child_id << offset;
+            child_id |= self.shard_id;
+            shard_ids.push(child_id);
         }
-        if let Some(children) = &self.children {
-            for child in children.iter() {
-                child.collect_shards_near(pos, margin_sqr, results);
-            }
-        } else {
-            results.push(self.shard_id);
-        }
+        shard_ids
     }
 
     pub fn move_entity(&mut self, entity: Entity, shard_manager: &mut ShardManager) {

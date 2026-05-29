@@ -11,8 +11,8 @@ impl ShardManager {
         }
     }
 
-    pub fn on_new_shard(&mut self, shard_id: u32) {
-        println!("on_new_shard: {}", shard_id);
+    pub fn on_new_shard(&mut self, shard_ids: Vec<u32>) {
+        //println!("on_new_shard: {:?}", shard_ids);
     }
 
     pub fn on_shard_destroyed(&mut self, shard_id: Vec<u32>) {
