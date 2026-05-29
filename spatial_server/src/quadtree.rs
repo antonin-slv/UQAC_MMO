@@ -18,7 +18,8 @@ pub struct QuadTree {
     pub bounds: Rect,
     pub depth: u8,
     pub max_depth: u8,
-    pub capacity: usize,
+    pub subdivide_threshold: usize,
+    pub merge_threshold: usize,
     pub entities: Vec<Entity>,
     pub children: Option<Box<[QuadTree; 4]>>,
     pub shard_id: u32,
@@ -43,12 +44,24 @@ impl QuadTree {
             .parse()
             .expect("Env QUADTREE_MAX_DEPTH is not a number");
 
-        let quadtree_capacity = env::var("QUADTREE_CAPACITY")
-            .expect("Env QUADTREE_CAPACITY is not set")
+        let subdivide_threshold = env::var("SUBDIVIDE_THRESHOLD")
+            .expect("Env SUBDIVIDE_THRESHOLD is not set")
             .parse()
-            .expect("Env QUADTREE_CAPACITY is not a number");
+            .expect("Env SUBDIVIDE_THRESHOLD is not a number");
 
-        let mut quadtree = Self::new_internal(map_size, 0, max_depth, quadtree_capacity, 0);
+        let merge_threshold = env::var("MERGE_THRESHOLD")
+            .expect("Env MERGE_THRESHOLD is not set")
+            .parse()
+            .expect("Env MERGE_THRESHOLD is not a number");
+
+        let mut quadtree = Self::new_internal(
+            map_size,
+            0,
+            max_depth,
+            subdivide_threshold,
+            merge_threshold,
+            0,
+        );
 
         quadtree.subdivide(shard_manager);
 
@@ -59,15 +72,17 @@ impl QuadTree {
         bounds: Rect,
         depth: u8,
         max_depth: u8,
-        capacity: usize,
+        subdivide_threshold: usize,
+        merge_threshold: usize,
         shard_id: u32,
     ) -> Self {
         Self {
             bounds,
             depth,
             max_depth,
-            capacity,
-            entities: Vec::with_capacity(capacity),
+            subdivide_threshold,
+            merge_threshold,
+            entities: Vec::with_capacity(subdivide_threshold),
             children: None,
             shard_id,
         }
@@ -90,7 +105,7 @@ impl QuadTree {
         self.entities.push(entity);
         shard_manager.set_entity_shard(self.shard_id, entity.id);
 
-        if self.entities.len() > self.capacity && self.depth < self.max_depth {
+        if self.entities.len() > self.subdivide_threshold && self.depth < self.max_depth {
             self.subdivide(shard_manager);
         }
 
@@ -101,34 +116,39 @@ impl QuadTree {
         let sub_bounds = self.bounds.split();
 
         let shard_ids = self.generate_shard_id();
+        println!("{:?}", sub_bounds[0]);
 
         let mut children = Box::new([
             QuadTree::new_internal(
                 sub_bounds[0],
                 self.depth + 1,
                 self.max_depth,
-                self.capacity,
+                self.subdivide_threshold,
+                self.merge_threshold,
                 shard_ids.get(0).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[1],
                 self.depth + 1,
                 self.max_depth,
-                self.capacity,
+                self.subdivide_threshold,
+                self.merge_threshold,
                 shard_ids.get(1).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[2],
                 self.depth + 1,
                 self.max_depth,
-                self.capacity,
+                self.subdivide_threshold,
+                self.merge_threshold,
                 shard_ids.get(2).cloned().unwrap_or_default(),
             ),
             QuadTree::new_internal(
                 sub_bounds[3],
                 self.depth + 1,
                 self.max_depth,
-                self.capacity,
+                self.subdivide_threshold,
+                self.merge_threshold,
                 shard_ids.get(3).cloned().unwrap_or_default(),
             ),
         ]);
@@ -149,7 +169,7 @@ impl QuadTree {
     pub fn try_merge(&mut self, shard_manager: &mut ShardManager) {
         let entity_count = self.count_entities();
         if let Some(children) = self.children.as_mut() {
-            if entity_count < self.capacity / 2 {
+            if entity_count < self.merge_threshold {
                 self.merge(shard_manager);
             } else {
                 for child in children.iter_mut() {

@@ -14,6 +14,6 @@ WORKDIR /app
 # On récupère l'exécutable
 COPY --from=builder /usr/src/app/target/release/spatial_server /app/spatial_server
 
-EXPOSE 3632/udp
+EXPOSE 3634/udp
 
 CMD ["./spatial_server"]
