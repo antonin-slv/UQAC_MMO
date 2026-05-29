@@ -20,6 +20,13 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
 const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
+
+fn topic_from_uuid(uuid: &uuid::Uuid) -> Topic {
+    let mut topic = [0u8; 32];
+    topic[..16].copy_from_slice(uuid.as_bytes());
+    topic
+}
+
 #[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkId(pub u32);
 
@@ -114,12 +121,12 @@ impl Plugin for NetworkPlugin {
         // retrieving the uuid
         let server_uuid = env::var(SELF_UUID_ENV_NAME);
         let server_uuid = match server_uuid {
-            Ok(server_uuid) => match (uuid::Uuid::try_parse(&server_uuid)) {
+            Ok(server_uuid) => match uuid::Uuid::try_parse(&server_uuid) {
                 Ok(uuid) => uuid,
-                Err(E) => {
+                Err(e) => {
                     panic!(
                         "Error : {} has error : {}\n\twith : {}",
-                        SELF_UUID_ENV_NAME, E, server_uuid
+                        SELF_UUID_ENV_NAME, e, server_uuid
                     );
                 }
             },
@@ -151,6 +158,7 @@ impl Plugin for NetworkPlugin {
             .expect("Port de l'orchestrateur invalide");
 
         let brocker_peer = GamePeer::new(QuicBackend::new());
+        let server_topic = topic_from_uuid(&server_uuid);
         brocker_peer
             .connect(broker_ip, brocker_port)
             .expect("Impossible de configurer le socket vers l'Orchestrateur");
@@ -167,7 +175,7 @@ impl Plugin for NetworkPlugin {
                     zone: "default".to_string(),
                     total_players: 0,
                     max_players,
-                    topic: [0; 32].into(),
+                    topic: server_topic,
                     external_url: listen_ip.to_string(),
                     external_port: listen_port,
                     uuid: server_uuid,
@@ -223,11 +231,6 @@ fn send_heartbeat_system(
 
             if let Err(e) = broker.peer.send(conn, &heartbeat_stream, data.freeze()) {
                 eprintln!("[Server] Erreur d'envoi du heartbeat: {:?}", e);
-            } else {
-                println!(
-                    "[Server] Heartbeat envoyé (Joueurs: {}/{})",
-                    heartbeat.player_count, heartbeat.max_players
-                );
             }
         }
     }
@@ -235,6 +238,7 @@ fn send_heartbeat_system(
 
 fn network_bridge_system(
     mut broker: ResMut<BrockerManager>,
+    server_info: Res<ServerStats>,
     mut msg_connected: MessageWriter<PlayerConnected>,
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
@@ -271,9 +275,10 @@ fn network_bridge_system(
                         println!("[Server] Handshake stream created by broker (conn: {:?})", connexion);
                         let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
                         let friend_type = BrokerFriends::Server as u8;
-                        let mut data = BytesMut::with_capacity(2);
+                        let mut data = BytesMut::with_capacity(2 + 16);
                         data.put_u8(hello_packet_header);
                         data.put_u8(friend_type);
+                        data.put_slice(server_info.uuid.as_bytes());
                         broker.peer
                             .send(&connexion, &game_stream, data.freeze())
                             .unwrap_or_else(|e| {
@@ -307,6 +312,8 @@ fn route_message_events(
     msg_connected: &mut MessageWriter<PlayerConnected>,
     _msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
 ) {
+
+
     let GameNetworkEvent::Message {
         connection,
         stream,
@@ -337,6 +344,7 @@ fn route_message_events(
             }
 
             BrokerMessageHeaders::SpawnClient => {
+                println!("[Server] SpawnClient message received");
                 let client_id = ClientId::extract_from_slice(data.get(1..5)?)?;
                 let pseudo_len = data.get(5..6)?.first().cloned()? as usize;
                 let pseudo_end = 6 + pseudo_len;
@@ -360,13 +368,18 @@ fn route_message_events(
                 });
                 Some(())
             }
-            _ => None,
+            _ => {
+                println!(
+                    "[Server] Unrecognized message header received: {:?} (raw: {})",
+                    header, header_byte
+                );
+                None
+            }
         }
     };
 
     let rslt = process_message();
-    if let None = rslt {}
-    {
+    if rslt.is_none() {
         eprintln!("[Server] Une erreure ou un message non reconnu reçu sur le réseau");
     }
 

@@ -98,8 +98,8 @@ services:
     env_file:
       - .env
     ports:
-      - "3632:3632"
-      - "3633:3633"
+      - "3632:3632/udp"
+      - "3633:3633/udp"
     restart: always
     container_name: broker
     networks:

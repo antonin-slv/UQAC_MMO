@@ -162,7 +162,7 @@ fn handle_login_task(
     mut tasks: Query<(Entity, &mut LoginTask)>,
     mut ui_data: ResMut<LoginUiData>,
     mut next_state: ResMut<NextState<ClientState>>,
-    mut net: ResMut<NetworkManager>,
+    net: ResMut<NetworkManager>,
 ) {
     for (entity, mut task) in tasks.iter_mut() {
         // block_on avec poll (now_or_never) ne bloque pas le jeu !
@@ -177,7 +177,9 @@ fn handle_login_task(
                     println!("Connexion au serveur cible: {}:{}", login_response.server.ip, login_response.server.port);
 
                     // --- On tente de se connecter au server ici --- cf network pour la suite.
-                    net.peer.connect(&login_response.server.ip, login_response.server.port).expect("Échec de la connexion au serveur de jeu");
+                    net.peer
+                        .connect(login_response.server.ip.as_str(), login_response.server.port)
+                        .expect("Échec de la connexion au serveur de jeu");
 
                     // Et on passe en jeu
                     next_state.set(ClientState::Connecting);

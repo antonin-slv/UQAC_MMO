@@ -150,7 +150,9 @@ async fn listen_heartbeat(peer: &mut GamePeer, redis: &RedisManager) -> Result<(
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        println!("[Orchestrator] Unknown message type from {:?}", connection);
+                    }
                 }
             }
             GameNetworkEvent::StreamCreated(connexion, game_stream) => {
@@ -171,7 +173,9 @@ async fn listen_heartbeat(peer: &mut GamePeer, redis: &RedisManager) -> Result<(
                         println!("[Orchestrator] Sent handshake response to {:?}", connexion);
                     }
 
-                    _ => {}
+                    _ => {
+                        println!("[Orchestrator] Unknown stream id {:?} from {:?}", game_stream.real_stream_id(), connexion);
+                    }
                 }
             }
 
