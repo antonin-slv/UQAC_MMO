@@ -77,7 +77,5 @@ fn capture_inputs(
     packet.put_slice(&input_for_net);
     if let Err(e) = net.peer.send(&conn, &stream, packet.freeze()) {
         eprintln!("Erreur lors de l'envoi des inputs: {:?}", e);
-    } else {
-        eprintln!("Erreur lors de l'envoi des inputs");
     }
 }

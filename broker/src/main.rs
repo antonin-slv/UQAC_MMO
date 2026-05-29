@@ -1,10 +1,10 @@
 pub mod broker_inner_structs;
 
 use crate::broker_inner_structs::{BrokerState, ConnectionOwner};
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use dotenv::dotenv;
 use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
+use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 use shared_replication::STREAM_HANDSHAKE;
 use shared_replication::broker::*;
 use std::env;
@@ -72,26 +72,73 @@ fn run_broker(mut client_peer: GamePeer, mut safe_peer: GamePeer) {
 
     loop {
         while let Ok(Some(event)) = client_peer.poll() {
-            broker_tick(&mut client_peer, &mut broker_state, event, false);
+            broker_tick(
+                &mut client_peer,
+                &mut safe_peer,
+                &mut broker_state,
+                event,
+                false,
+            );
         }
 
         while let Ok(Some(event)) = safe_peer.poll() {
-            broker_tick(&mut safe_peer, &mut broker_state, event, true);
+            broker_tick(
+                &mut client_peer,
+                &mut safe_peer,
+                &mut broker_state,
+                event,
+                true,
+            );
         }
 
         //todo : retirer ça en prod.
         std::thread::sleep(std::time::Duration::from_micros(100));
-        
+    }
+}
+
+fn send_to_connection(
+    client_peer: &mut GamePeer,
+    safe_peer: &mut GamePeer,
+    broker_state: &BrokerState,
+    connection: &GameConnection,
+    stream: &GameStream,
+    data: Bytes,
+) -> Result<(), game_sockets::GameSocketError> {
+    match broker_state.get_owner_by_co(connection) {
+        Some(ConnectionOwner::Client(_)) => client_peer.send(connection, stream, data),
+        Some(ConnectionOwner::Shard(_))
+        | Some(ConnectionOwner::Spatial())
+        | Some(ConnectionOwner::Orchestrator()) => safe_peer.send(connection, stream, data),
+        None => Err(game_sockets::GameSocketError::ConnectionError),
     }
 }
 
 fn broker_tick(
-    peer: &mut GamePeer,
+    client_peer: &mut GamePeer,
+    safe_peer: &mut GamePeer,
     broker_state: &mut BrokerState,
     event: GameNetworkEvent,
     is_safe: bool,
 ) {
     match event {
+        GameNetworkEvent::Connected(conn) => {
+            println!(
+                "[Broker] Nouvelle {} connexion : {:?}",
+                if is_safe { "safe" } else { "unsafe" },
+                conn
+            );
+
+            let peer = if is_safe { safe_peer } else { client_peer };
+            if let Err(e) =
+                peer.create_stream(conn, GameStreamReliability::Reliable, STREAM_HANDSHAKE)
+            {
+                println!(
+                    "[NetworkBridge] failed to create the Handshake stream {:?}",
+                    e
+                );
+            }
+        }
+
         GameNetworkEvent::Disconnected(conn) => {
             println!("[Broker] Disconnected : {:?}", conn);
             if let Some(owner) = broker_state.remove_by_co(&conn) {
@@ -115,7 +162,14 @@ fn broker_tick(
 
                         let stream =
                             GameStream::new(STREAM_HANDSHAKE, GameStreamReliability::Unreliable);
-                        let _ = peer.send(auth_loc, &stream, disconnect_packet.freeze());
+                        let _ = send_to_connection(
+                            client_peer,
+                            safe_peer,
+                            broker_state,
+                            auth_loc,
+                            &stream,
+                            disconnect_packet.freeze(),
+                        );
                     }
                     ConnectionOwner::Shard(topic) => {
                         if let Some(_conn) = broker_state.get_subscribers(&topic) {
@@ -138,19 +192,6 @@ fn broker_tick(
 
                 // todo : faire quelque chose de plus élégant que de supprimer tout les abonnements de cette connexion ?
                 broker_state.unsubscribe_connexion_all(conn);
-            }
-        }
-
-        GameNetworkEvent::Connected(conn) => {
-            println!("[Broker] Nouvelle connexion : {:?}", conn);
-            match peer.create_stream(conn, GameStreamReliability::Reliable, STREAM_HANDSHAKE) {
-                Ok(_) => {}
-                Err(e) => {
-                    println!(
-                        "[NetworkBridge] failed to create the Handshake stream {:?}",
-                        e
-                    );
-                }
             }
         }
 
@@ -202,25 +243,56 @@ fn broker_tick(
                         broker_state.unsubscribe_client(client_id, topic);
                     }
                     BrokerMessageHeaders::Publish => {
-                        //faire des sécurités.
                         let publish_data = data.clone();
-                        let topic = publish_data.get(1..32)?.try_into().ok()?;
-                        let data_len_le_bytes = publish_data.get(33..35)?;
-                        let data_len =
-                            u16::from_le_bytes(data_len_le_bytes.try_into().ok()?) as usize;
+                        let topic: Topic = publish_data.get(1..33)?.try_into().ok()?;
+
+                        // Support both the new 2-byte length and the legacy usize length.
+                        let (data_len, payload_start) = if let Some(len_bytes) =
+                            publish_data.get(33..35)
+                        {
+                            let data_len = u16::from_le_bytes(len_bytes.try_into().ok()?) as usize;
+                            (data_len, 35)
+                        } else {
+                            print!("\t No 2-byte length found.");
+                            return None; // Invalid packet format, no length found
+                        };
 
                         //byte 1 : Broadcast packet / byte 2/3 : packet Len / next bytes : data
                         let mut broadcast_packet = BytesMut::with_capacity(1 + 2 + data_len);
                         broadcast_packet.put_u8(BrokerMessageHeaders::Broadcast as u8);
-                        broadcast_packet.put_slice(data_len_le_bytes);
-                        broadcast_packet.put_slice(publish_data.get(35..(35 + data_len))?);
+                        broadcast_packet
+                            .put_slice(&u16::try_from(data_len).unwrap_or(u16::MAX).to_le_bytes());
+                        broadcast_packet.put_slice(
+                            publish_data.get(payload_start..(payload_start + data_len))?,
+                        );
 
                         let broadcast_data = broadcast_packet.freeze();
 
                         if let Some(client_ids) = broker_state.get_subscribers(&topic) {
                             for conn in client_ids {
-                                let _ = peer.send(conn, &stream, broadcast_data.clone());
+                                if send_to_connection(
+                                    client_peer,
+                                    safe_peer,
+                                    broker_state,
+                                    conn,
+                                    &stream,
+                                    broadcast_data.clone(),
+                                )
+                                .is_err()
+                                {
+                                    eprintln!(
+                                        "[Broker] Failed to send broadcast message to client {:?}",
+                                        conn
+                                    );
+                                } else {
+                                    print!(".");
+                                }
                             }
+                        } else {
+                            eprintln!(
+                                "[Broker] No subscribers found for topic {:?} when trying to publish",
+                                topic
+                            );
                         }
                     }
                     BrokerMessageHeaders::ClientHello => {
@@ -242,15 +314,26 @@ fn broker_tick(
                         welcome_paquet.put_u8(BrokerMessageHeaders::ClientWelcome as u8);
                         welcome_paquet.put_u32_le(client_id);
 
-                        if peer
-                            .send(&connection, &stream, welcome_paquet.freeze())
-                            .is_err()
+                        if send_to_connection(
+                            client_peer,
+                            safe_peer,
+                            broker_state,
+                            &connection,
+                            &stream,
+                            welcome_paquet.freeze(),
+                        )
+                        .is_err()
                         {
                             eprintln!(
                                 "[Broker] Failed to send welcome packet to client {:?}",
                                 connection
                             );
                             return None;
+                        } else {
+                            println!(
+                                "[Broker] Welcome packet sent to client {:?} with assigned ID {:?}",
+                                connection, client_id
+                            );
                         }
                         // sends the spawn paquet for the server - - - - - - - - - - - - - - - - -
                         let Some(topic_choosen) = broker_state.get_random_server_id() else {
@@ -272,7 +355,29 @@ fn broker_tick(
 
                         let serv_connexion = broker_state.get_by_server_id(&topic_choosen)?;
 
-                        let _ = peer.send(serv_connexion, &stream, spawn_client_paquet.freeze());
+                        let stream = GameStream::new(0, GameStreamReliability::Unreliable);
+
+                        if send_to_connection(
+                            client_peer,
+                            safe_peer,
+                            broker_state,
+                            serv_connexion,
+                            &stream,
+                            spawn_client_paquet.freeze(),
+                        )
+                        .is_err()
+                        {
+                            eprintln!(
+                                "[Broker] Failed to send spawn client packet to server {:?}",
+                                serv_connexion
+                            );
+                            return None;
+                        } else {
+                            println!(
+                                "[Broker] Spawn client packet sent to server {:?}",
+                                serv_connexion
+                            );
+                        }
                     }
 
                     BrokerMessageHeaders::ClientInput => {
@@ -280,28 +385,62 @@ fn broker_tick(
                         let client_id = ClientId::extract_from_slice(data.get(1..5)?)?;
                         if *broker_state.get_client_by_co(&connection)? != client_id {
                             //security check
+                            eprint!(
+                                "[Broker] Unauthorized ClientInput message from connection {:?} for client_id {:?}",
+                                connection, client_id
+                            );
                             return None;
                         }
 
                         let topic = broker_state.get_client_authoritative_location(client_id)?;
                         //todo : changer ça ? ici on part du principe que les identifiants des serveurs sont exactement leur topic.
                         if let Some(shard_conn) = broker_state.get_by_server_id(topic) {
-                            //liaison location -> shard
-                            let _ = peer.send(shard_conn, &stream, data.clone());
+                            let _ = send_to_connection(
+                                client_peer,
+                                safe_peer,
+                                broker_state,
+                                shard_conn,
+                                &stream,
+                                data.clone(),
+                            );
+                        } else {
+                            eprintln!(
+                                "[Broker] No shard found for client {:?} with topic {:?}",
+                                connection, topic
+                            );
                         }
                     }
 
                     BrokerMessageHeaders::Heartbeat => {
-                        println!("[Broker] Heartbeat received!");
                         if !is_safe {
-                            println!("\t nuts ! it wasn't safe.");
+                            println!(
+                                "\t Unsafe heartbeat received from {:?}, discarding.",
+                                connection
+                            );
                             return None;
                         }
-                        let orchestrator_connexion = (*broker_state.get_orchestrator_co())?;
-                        match peer.send(&orchestrator_connexion, &stream, data.clone()) {
+
+                        let orchestrator_connexion =
+                            if let Some(conn) = broker_state.get_orchestrator_co() {
+                                conn
+                            } else {
+                                eprintln!(
+                                    "[Broker] No orchestrator found to forward heartbeat from {:?}",
+                                    connection
+                                );
+                                return None;
+                            };
+                        match send_to_connection(
+                            client_peer,
+                            safe_peer,
+                            broker_state,
+                            &orchestrator_connexion,
+                            &stream,
+                            data.clone(),
+                        ) {
                             Ok(_) => (),
                             Err(e) => {
-                                println!(
+                                eprintln!(
                                     "[Broker] Failed to forward heartbeat to orchestrator: {:?}",
                                     e
                                 );
@@ -315,26 +454,27 @@ fn broker_tick(
                             connection
                         );
                         if !is_safe {
-                            println!("\t nuts ! it wasn't safe.");
+                            println!("\t it was not safe, discarding.");
                             return None;
                         }
 
                         let friend_type: u8 = data.get(1..2)?.first().copied()?;
-                        let friend_type = BrokerFriends::try_from(friend_type).ok()?;
+                        let friend_type = BrokerFriends::from(friend_type);
 
                         match friend_type {
                             BrokerFriends::Server => {
-                                println!("[Broker] received friend_hello from server");
-                                //todo : make something correct here
-                                let default_topic = [0; 32];
-                                broker_state.add_server(default_topic, connection);
+                                println!("\t it was from a server");
+                                let server_uuid = data.get(2..18)?;
+                                let mut topic = [0u8; 32];
+                                topic[..16].copy_from_slice(server_uuid);
+                                broker_state.add_server(topic, connection);
                             }
                             BrokerFriends::Orchestrator => {
-                                println!("[Broker] received friend_hello from orchestrator");
+                                println!("\t it was from an orchestrator");
                                 broker_state.add_orchestrator(connection);
                             }
                             BrokerFriends::Spatial => {
-                                println!("[Broker] received friend_hello from spatial");
+                                println!("\t it was from a spatial server");
                                 broker_state.add_spatial_server(connection);
                             }
 
@@ -361,12 +501,11 @@ fn broker_tick(
             match process_rslt {
                 None => {
                     println!(
-                        "[Broker] Discarded message from {:?} because of invalid format or unauthorized action",
-                        connection
+                        "[Broker] Discarded message from {:?} because of invalid format or unauthorized action (header {})",
+                        connection, header_byte
                     );
                 }
-                Some(_) => {
-                }
+                Some(_) => {}
             }
         }
 

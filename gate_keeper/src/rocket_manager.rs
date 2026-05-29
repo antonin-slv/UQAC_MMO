@@ -69,14 +69,25 @@ async fn health() -> content::RawJson<&'static str> {
 async fn get_available_server(
     redis: &State<Arc<RedisManager>>,
 ) -> Result<Json<LoginResponse>, Status> {
+    //todo : rework this
+
+    let host_address = env::var("HOST_ADDRESS")
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
+
+    let broker_port = env::var("BROKER_PUBLIC_PORT")
+        .expect("Env BROKER_PRIVATE_PORT is not set")
+        .parse()
+        .expect("Env BROKER_PRIVATE_PORT is not a u16");
+
+
     let available_servers = redis.get_available_servers().await;
     if let Ok(available_servers) = available_servers {
         if let Some(server) = available_servers.first() {
             let response = LoginResponse {
                 player_id: "7db9b582-7771-4654-8e81-799f9c73e34b".to_string(),
                 server: ServerInfo {
-                    ip: server.address.clone(),
-                    port: server.port,
+                    ip: host_address,
+                    port: broker_port,
                     zone: server.area.clone(),
                 },
             };

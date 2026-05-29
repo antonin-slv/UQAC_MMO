@@ -61,11 +61,12 @@ fn broadcast_snapshots(
             //extract topic from server_data
             let topic = server_data.topic;
             let data_len = snapshot_as_bytes.len();
-            let data_len_u8 = data_len.to_le_bytes();
-            let mut data = BytesMut::with_capacity(1 + topic.len() + data_len_u8.len() + data_len);
+            let data_len_u16 = data_len as u16;
+            let data_len_bytes = data_len_u16.to_le_bytes();
+            let mut data = BytesMut::with_capacity(1 + topic.len() + data_len_bytes.len() + data_len);
             data.put_u8(publish_head as u8);
             data.put_slice(&topic);
-            data.put_slice(&data_len_u8);
+            data.put_slice(&data_len_bytes);
                 data.put_slice(&snapshot_as_bytes);
 
             // Envoi du snapshot !

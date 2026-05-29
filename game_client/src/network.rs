@@ -1,4 +1,4 @@
-﻿use crate::{PlayerBundle};
+﻿use crate::PlayerBundle;
 use crate::structs::{ClientState, LocalPlayer};
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
@@ -8,16 +8,16 @@ use bevy::prelude::*;
 use bytes::{BufMut, BytesMut};
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
-use shared_replication::{STREAM_HANDSHAKE};
-use shared_replication::client_server::*;
+use shared_replication::STREAM_HANDSHAKE;
 use shared_replication::broker::{BrokerMessageHeaders, ClientId, SafeExtract};
+use shared_replication::client_server::*;
 
 #[derive(Component)]
 struct NetworkEntity(u32);
 
 // Pour stocker la connexion au serveur (pour savoir à qui envoyer nos inputs)
 #[derive(Resource, Default)]
-pub(crate) struct ServerConnection{
+pub(crate) struct ServerConnection {
     pub(crate) game_connection: Option<GameConnection>,
     pub(crate) handshake_stream: Option<GameStream>,
 }
@@ -36,7 +36,6 @@ pub struct ClientNetworkPlugin;
 
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
-
         // On enregistre les systèmes liés aux joueurs
         // 1. Initialisation de la librairie réseau
         let peer = GamePeer::new(QuicBackend::new());
@@ -46,8 +45,15 @@ impl Plugin for ClientNetworkPlugin {
             .insert_resource(LocalPlayer::default())
             // "event" réception de snapshot
             .add_message::<SnapshotMessage>()
-            .add_systems(PreUpdate, network_bridge_system.run_if(in_state(ClientState::Connecting).or(in_state(ClientState::InGame))))
-            .add_systems(Update, process_snapshots.run_if(in_state(ClientState::InGame)));
+            .add_systems(
+                PreUpdate,
+                network_bridge_system
+                    .run_if(in_state(ClientState::Connecting).or(in_state(ClientState::InGame))),
+            )
+            .add_systems(
+                Update,
+                process_snapshots.run_if(in_state(ClientState::InGame)),
+            );
     }
 }
 
@@ -66,19 +72,18 @@ fn network_bridge_system(
             GameNetworkEvent::Connected(conn) => {
                 println!("[Client] Socket connecté. Attente de la création du stream");
                 server_conn.game_connection = Some(conn.clone());
-
             }
 
             // ÉTAPE 2 & 3 : Réception des messages du serveur
-            GameNetworkEvent::Message { stream, data, .. } => {
-
+            GameNetworkEvent::Message { stream: _, data, .. } => {
                 let discard_message = BrokerMessageHeaders::DiscardedMessageBecauseYouKnow as u8;
                 let header_byte = data.first().unwrap_or(&discard_message);
                 let header = BrokerMessageHeaders::from(*header_byte);
 
                 match header {
                     BrokerMessageHeaders::Broadcast => {
-                        let data_len : u16 = u16::from_le_bytes(data[1..3].try_into().unwrap_or([0, 0]));
+                        let data_len: u16 =
+                            u16::from_le_bytes(data[1..3].try_into().unwrap_or([0, 0]));
                         let content = &data[3..(3 + data_len as usize)];
                         if let Ok(snapshot) = bincode::deserialize::<PersonalSnapshot>(content) {
                             msg_snapshot.write(SnapshotMessage(snapshot));
@@ -107,23 +112,23 @@ fn network_bridge_system(
                 server_conn.handshake_stream = None;
                 local_player.net_id = 0;
                 next_state.set(ClientState::LoginMenu)
-
             }
 
             GameNetworkEvent::StreamCreated(conn, stream) => {
-
                 println!("[Client] Stream créé : {}", stream.real_stream_id());
                 if stream.real_stream_id() == STREAM_HANDSHAKE {
-
                     let header = BrokerMessageHeaders::ClientHello as u8;
-                    let pseudo = local_player.pseudo.clone().unwrap_or("NO_PSEUDO".to_string());
+                    let pseudo = local_player
+                        .pseudo
+                        .clone()
+                        .unwrap_or("NO_PSEUDO".to_string());
                     let pseudo = pseudo.as_bytes();
                     let pseudo_len = pseudo.len();
-                    let pseudo_u16 = pseudo.len() as u16;
+                    let pseudo_u8 = pseudo.len() as u8;
 
-                    let mut hello_packet = BytesMut::with_capacity(1 + 2 + pseudo_len);
+                    let mut hello_packet = BytesMut::with_capacity(1 + 1 + pseudo_len);
                     hello_packet.put_u8(header);
-                    hello_packet.put_u16_le(pseudo_u16);
+                    hello_packet.put_u8(pseudo_u8);
                     hello_packet.put_slice(pseudo);
 
                     let _ = net.peer.send(&conn, &stream, hello_packet.freeze());
