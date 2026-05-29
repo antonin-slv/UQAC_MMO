@@ -18,6 +18,8 @@ pub struct Rect {
     pub max_y: f32,
 }
 
+pub type OwnedArea = (Rect, Vec<Vec2>);
+
 impl Rect {
     pub fn contains(&self, p: Vec2) -> bool {
         p.x >= self.min_x && p.x <= self.max_x && p.y >= self.min_y && p.y <= self.max_y

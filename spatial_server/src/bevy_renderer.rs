@@ -7,7 +7,9 @@ use bevy::camera::Camera2d;
 use bevy::color::{Color, Srgba};
 use bevy::input::ButtonInput;
 use bevy::math::{Isometry2d, Rot2, Vec2};
-use bevy::prelude::{Commands, Component, Gizmos, KeyCode, Query, Res, ResMut, Resource, Time};
+use bevy::prelude::{
+    Commands, Component, Fixed, FixedUpdate, Gizmos, KeyCode, Query, Res, ResMut, Resource, Time,
+};
 use bevy_text_gizmos::TextGizmos;
 use rand::RngExt;
 pub(crate) use shared_replication::math::Rect;
@@ -28,12 +30,18 @@ pub struct Player {
 }
 
 pub fn start_renderer(shard_manager: ShardManager, quad_tree: QuadTree) {
+    let merge_frequency: f64 = env::var("MERGE_FREQUENCY")
+        .expect("Env MERGE_FREQUENCY is not set")
+        .parse()
+        .expect("MERGE_FREQUENCY is not an float");
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(ShardManagerResource { shard_manager })
         .insert_resource(QuadtreeResource { quad_tree })
         .add_systems(Startup, setup)
         .add_systems(Update, (draw_gizmos, update, movement))
+        .insert_resource(Time::<Fixed>::from_seconds(1.0 / merge_frequency))
+        .add_systems(FixedUpdate, merge_quadtree)
         .run();
 }
 
@@ -100,6 +108,15 @@ fn update(
             .quad_tree
             .move_entity(player.entity, &mut shard_manager.shard_manager);
     }
+}
+
+fn merge_quadtree(
+    mut quadtree: ResMut<QuadtreeResource>,
+    mut shard_manager: ResMut<ShardManagerResource>,
+) {
+    quadtree
+        .quad_tree
+        .try_merge(&mut shard_manager.shard_manager);
 }
 
 fn draw_gizmos(mut gizmos: Gizmos, resource_manager: Res<QuadtreeResource>) {

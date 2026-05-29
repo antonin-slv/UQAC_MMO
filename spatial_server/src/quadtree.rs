@@ -146,26 +146,28 @@ impl QuadTree {
         self.children = Some(children);
     }
 
-    fn try_merge(&mut self, shard_id: u32, shard_manager: &mut ShardManager) -> bool {
+    pub fn try_merge(&mut self, shard_manager: &mut ShardManager) {
+        let entity_count = self.count_entities();
         if let Some(children) = self.children.as_mut() {
-            let child_id = ((shard_id >> self.depth * 2) & 3) as usize;
-            if children[child_id].shard_id == shard_id && self.depth > 0 {
-                let mut entity_count = 0;
-                for child in children.iter_mut() {
-                    entity_count += child.entities.len();
-                }
-
-                if entity_count < self.capacity {
-                    self.merge(shard_manager);
-                    return true;
-                }
+            if entity_count < self.capacity / 2 {
+                self.merge(shard_manager);
             } else {
-                return children[child_id].try_merge(shard_id, shard_manager);
+                for child in children.iter_mut() {
+                    child.try_merge(shard_manager);
+                }
+            }
+        }
+    }
+
+    fn count_entities(&self) -> usize {
+        let mut count = self.entities.len();
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                count += child.count_entities();
             }
         }
 
-        println!("Feur");
-        false
+        count
     }
 
     fn merge(&mut self, shard_manager: &mut ShardManager) {
@@ -182,8 +184,6 @@ impl QuadTree {
             shard_manager.on_shard_destroyed(destroyed_shards);
 
             self.children = None;
-
-            self.try_merge(self.shard_id, shard_manager);
         }
     }
 
@@ -210,9 +210,7 @@ impl QuadTree {
         if let Some(old_shard_id) = old_shard_id
             && let Some(current_shard_id) = shard_manager.get_shard(entity.id)
             && old_shard_id != current_shard_id
-        {
-            self.try_merge(old_shard_id, shard_manager);
-        }
+        {}
     }
 
     fn remove_entity(&mut self, entity: Entity, shard_id: u32, shard_manager: &mut ShardManager) {
