@@ -9,7 +9,7 @@ use std::env;
 use std::sync::Arc;
 
 pub struct RocketManager {
-    rocket: Rocket<Ignite>,
+    _rocket: Rocket<Ignite>,
 }
 
 impl RocketManager {
@@ -27,7 +27,7 @@ impl RocketManager {
             .launch()
             .await
             .expect("Rocket failed to launch");
-        RocketManager { rocket }
+        RocketManager { _rocket: rocket }
     }
 }
 
@@ -54,11 +54,15 @@ async fn register(
     redis: &State<Arc<RedisManager>>,
     register: Json<Register>,
 ) -> Result<Json<LoginResponse>, Status> {
-    let _ = database
+    let result = database
         .register(register.username.as_str(), register.password.as_str())
         .await;
 
-    get_available_server(redis).await
+    if let Ok(_) = result {
+        get_available_server(redis).await
+    } else {
+        Err(Status::Conflict)
+    }
 }
 
 #[get("/health")]

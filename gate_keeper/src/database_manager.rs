@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{FromRow, Pool, Postgres};
 use std::env;
@@ -28,13 +28,17 @@ impl DatabaseManager {
         // Bien sûr pour des raisons de sécurité on hash le password
         let hashed_password = format!("hashed({})", password);
 
-        sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2)")
+        let result = sqlx::query("INSERT INTO users (username, password_hash) VALUES ($1, $2)")
             .bind(username)
             .bind(hashed_password)
             .execute(&self.pool)
             .await?;
 
-        Ok(())
+        if result.rows_affected() > 0 {
+            Ok(())
+        } else {
+            Err(anyhow!("Can't create new user"))
+        }
     }
 
     pub async fn login(&self, username: &str, password: &str) -> bool {

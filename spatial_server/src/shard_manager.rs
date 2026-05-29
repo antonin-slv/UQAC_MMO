@@ -1,0 +1,29 @@
+use std::collections::HashMap;
+
+pub struct ShardManager {
+    entities: HashMap<u32, u32>,
+}
+
+impl ShardManager {
+    pub fn new() -> ShardManager {
+        Self {
+            entities: HashMap::new(),
+        }
+    }
+
+    pub fn on_new_shard(&mut self, shard_ids: Vec<u32>) {
+        //println!("on_new_shard: {:?}", shard_ids);
+    }
+
+    pub fn on_shard_destroyed(&mut self, shard_id: Vec<u32>) {
+        println!("on_shard_destroyed: {:?}", shard_id);
+    }
+
+    pub fn set_entity_shard(&mut self, shard_id: u32, entity_id: u32) {
+        self.entities.insert(entity_id, shard_id);
+    }
+
+    pub fn get_shard(&self, entity_id: u32) -> Option<u32> {
+        self.entities.get(&entity_id).cloned()
+    }
+}
