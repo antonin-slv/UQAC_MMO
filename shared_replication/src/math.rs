@@ -25,12 +25,6 @@ impl Rect {
         p.x >= self.min_x && p.x <= self.max_x && p.y >= self.min_y && p.y <= self.max_y
     }
 
-    pub fn sqr_distance_to_point(&self, p: Vec2) -> f32 {
-        let dx = (self.min_x - p.x).max(0.0).max(p.x - self.max_x);
-        let dy = (self.min_y - p.y).max(0.0).max(p.y - self.max_y);
-        dx * dx + dy * dy
-    }
-
     pub fn split(&self) -> [Rect; 4] {
         let mid_x = (self.min_x + self.max_x) / 2.0;
         let mid_y = (self.min_y + self.max_y) / 2.0;
