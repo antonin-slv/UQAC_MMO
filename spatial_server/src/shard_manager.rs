@@ -19,7 +19,7 @@ impl ShardManager {
         println!("on_shard_destroyed: {:?}", shard_id);
     }
 
-    pub fn on_entity_move(&mut self, shard_id: u32, entity_id: u32) {
+    pub fn set_entity_shard(&mut self, shard_id: u32, entity_id: u32) {
         self.entities.insert(entity_id, shard_id);
     }
 

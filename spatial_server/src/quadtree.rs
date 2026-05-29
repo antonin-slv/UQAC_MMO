@@ -88,7 +88,7 @@ impl QuadTree {
         }
 
         self.entities.push(entity);
-        shard_manager.on_entity_move(self.shard_id, entity.id);
+        shard_manager.set_entity_shard(self.shard_id, entity.id);
 
         if self.entities.len() > self.capacity && self.depth < self.max_depth {
             self.subdivide(shard_manager);
@@ -175,7 +175,7 @@ impl QuadTree {
             let mut destroyed_shards: Vec<u32> = Vec::new();
             for child in children.iter_mut() {
                 for entity in child.entities.iter_mut() {
-                    shard_manager.on_entity_move(self.shard_id, entity.id);
+                    shard_manager.set_entity_shard(self.shard_id, entity.id);
                     self.entities.push(*entity);
                 }
 
