@@ -1,0 +1,12 @@
+[package]
+name = "mock_spatial_auth_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytes = { workspace = true }
+uuid = { workspace = true }
+shared_replication = { workspace = true }
+dotenv = { workspace = true }
+bollard = "0.21"
+tokio = { workspace = true }

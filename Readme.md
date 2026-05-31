@@ -17,3 +17,12 @@ docker compose up -d
 cargo run --package game_client --bin game_client -- 127.0.0.1 [PORT]
 ````
 ![Demo](./demo.png)
+
+
+
+
+
+### protocol : 
+
+L'orchestrator garde une pool de serveurs de jeux disponibles, vides.
+->
