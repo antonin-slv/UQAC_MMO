@@ -7,8 +7,13 @@ services:
   game_server:
     build:
       context: .
-      dockerfile: game_server/Dockerfile
+      dockerfile: crates/game_server/Dockerfile
     image: game-server
+    container_name: game_server_template
+    command: ["echo", "✅ Image game-server compilée et prête pour l'orchestrateur !"]
+    restart: "no"
+    networks:
+      - mmo_network
 
   db:
     image: postgres:15-alpine
@@ -37,7 +42,7 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: orchestrator/Dockerfile
+      dockerfile: crates/orchestrator/Dockerfile
     image: orchestrator
     env_file:
       - .env
@@ -46,8 +51,12 @@ services:
     ports:
       - "3631:3631"
     depends_on:
-      - redis
-      - game_server
+      redis :
+        condition: service_started
+      broker :
+        condition: service_started
+      game_server:
+          condition: service_completed_successfully
     restart: always
     container_name: orchestrator
     networks:
@@ -56,7 +65,7 @@ services:
   gate_keeper:
     build:
       context: .
-      dockerfile: gate_keeper/Dockerfile
+      dockerfile: crates/gate_keeper/Dockerfile
     image: gate-keeper
     env_file:
       - .env
@@ -89,7 +98,37 @@ services:
       ENGINE_con2: redis@dbgate-plugin-redis
       SERVER_con2: redis
       PORT_con2: 6379
-
+  broker:
+    build:
+      context: .
+      dockerfile: crates/broker/Dockerfile
+    image: broker
+    env_file:
+      - .env
+    ports:
+      - "3632:3632/udp"
+      - "3633:3633/udp"
+    restart: always
+    container_name: broker
+    networks:
+      - mmo_network
+  mock_spatial_auth_server:
+    build:
+      context: .
+      dockerfile: crates/mock_spatial_auth_server/Dockerfile
+    image: mock_spatial_auth_server
+    env_file:
+      - .env
+    depends_on:
+      - broker
+    restart: always
+    container_name: mock_spatial_auth_server
+    networks:
+      - mmo_network
+    ports:
+      - "3634:3634/udp"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 volumes:
   postgres_data:
   redis_data:

@@ -1,0 +1,24 @@
+[package]
+name = "game_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Héritées du workspace
+dotenv = { workspace = true }
+shared_replication = { workspace = true }
+uuid = { workspace = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+
+# Surcharge spécifique au serveur
+bevy = { version = "0.18.1", default-features = false }
+#bevy_rapier2d = {version = "0.33.0" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+

@@ -1991,6 +1991,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "broker"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "dotenv",
+ "game_sockets",
+ "nohash-hasher",
+ "rustc-hash 2.1.2",
+ "shared_replication",
+ "uuid",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3177,11 +3190,9 @@ dependencies = [
  "bincode",
  "bytes",
  "futures-lite",
- "game_sockets",
  "reqwest",
  "shared_replication",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -3192,7 +3203,6 @@ dependencies = [
  "bincode",
  "bytes",
  "dotenv",
- "game_sockets",
  "serde_json",
  "shared_replication",
  "uuid",
@@ -4469,6 +4479,18 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mock_spatial_auth_server"
+version = "0.1.0"
+dependencies = [
+ "bollard",
+ "bytes",
+ "dotenv",
+ "shared_replication",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -6442,11 +6464,12 @@ name = "shared_replication"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
+ "game_sockets",
  "redis",
  "rocket",
  "serde",
  "serde_json",
- "uuid",
 ]
 
 [[package]]
@@ -7661,9 +7684,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.23.1"
+version = "1.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
+checksum = "d258b83ceec21034727ecee8c382cfa6c3e133699b0742c64571814fb420c9f7"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",

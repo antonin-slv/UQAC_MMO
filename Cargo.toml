@@ -1,19 +1,21 @@
 [workspace]
 resolver = "3"
 members = [
-    "game_client",
-    "game_server",
-    "gate_keeper",
-    "orchestrator",
-    "shared_replication",
-    "game_sockets",
-    "spatial_server"]
+    "crates/game_client",
+    "crates/game_server",
+    "crates/gate_keeper",
+    "crates/orchestrator",
+    "crates/shared_replication",
+    "crates/game_sockets",
+    "crates/spatial_server",
+    "crates/broker",
+    "crates/mock_spatial_auth_server"]
 
 
 #common dependencies
 [workspace.dependencies]
-game_sockets = { path = "game_sockets" }
-shared_replication = { path = "shared_replication" }
+game_sockets = { path = "crates/game_sockets" }
+shared_replication = { path = "crates/shared_replication" }
 
 # --- Moteurs et Réseau ---
 bevy = "0.18.1"
