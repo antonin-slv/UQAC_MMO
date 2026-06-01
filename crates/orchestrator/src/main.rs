@@ -4,19 +4,19 @@ mod docker_manager;
 
 use crate::docker_manager::DockerManager;
 use anyhow::Result;
-use bytes::{BufMut, BytesMut};
 use dotenv::dotenv;
-use shared_replication::broker_topics::{BrokerMessageHeaders, Namespace, SecurityDomain, TopicBuilder};
+use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use shared_replication::msg_dgs::{Heartbeat, HeartbeatMessage};
+use shared_replication::msg_game_payload::GameMessageHeaders;
+use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use shared_replication::redis_manager::{GameServer, RedisManager};
-use shared_replication::servers::ServerType;
-use shared_replication::Heartbeat;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::time::interval;
 use uuid::Uuid;
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use tokio::sync::oneshot; // <-- Import du canal de synchronisation
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,7 +53,12 @@ async fn main() -> Result<()> {
         let mut ticker = interval(Duration::from_millis(100));
 
         let mut client = MmoNetworkClient::new();
-        client.connect(temp_docker.broker_ip.as_str(), temp_docker.broker_private_port).expect("TODO: panic message");
+        client
+            .connect(
+                temp_docker.broker_ip.as_str(),
+                temp_docker.broker_private_port,
+            )
+            .expect("TODO: panic message");
 
         println!(
             "Orchestrator connecting to Broker at {}:{}",
@@ -78,7 +83,9 @@ async fn main() -> Result<()> {
     let docker_scaler = Arc::clone(&docker);
 
     let scaler_handle = tokio::spawn(async move {
-        println!("[Orchestrator] En attente de la connexion au Broker avant d'autoriser le scaling...");
+        println!(
+            "[Orchestrator] En attente de la connexion au Broker avant d'autoriser le scaling..."
+        );
 
         // La tâche se bloque ici tant que le signal n'est pas reçu !
         let _ = broker_ready_rx.await;
@@ -142,26 +149,27 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
 async fn listen_broker(
     client: &mut MmoNetworkClient,
     redis: &RedisManager,
-    ready_tx: &mut Option<oneshot::Sender<()>>
+    ready_tx: &mut Option<oneshot::Sender<()>>,
 ) -> Result<()> {
     while let Some(event) = client.poll() {
         match event {
             ClientNetworkEvent::Ready => {
                 // 1. L'Orchestrateur s'abonne au canal "Director" pour recevoir les Heartbeats
-                let heartbeat_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
+                let heartbeat_topic =
+                    TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
                 client.subscribe(heartbeat_topic, 0);
                 println!("[Orchestrator] Abonné au topic Heartbeats.");
 
-                // 2. Envoi du Handshake / Hello
-                let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
-                let friend_type = ServerType::Orchestrator as u8;
-                let mut data = BytesMut::with_capacity(2);
-                data.put_u8(hello_packet_header);
-                data.put_u8(friend_type);
+                let msg = ServerHelloMSG {
+                    server_type: ServerType::Orchestrator,
+                    id: Uuid::new_v4().as_u128(),
+                };
 
                 // L'Orchestrateur annonce son existence sur le canal d'authentification
-                let auth_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection).build();
-                client.publish_reliable(auth_topic, data.freeze());
+                let auth_topic =
+                    TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
+                        .build();
+                client.publish_reliable(auth_topic, &msg);
                 println!("[Orchestrator] Handshake 'Hello' envoyé.");
 
                 client.subscribe(auth_topic, 0); //he listens the hello of the servers, I guess.
@@ -177,25 +185,16 @@ async fn listen_broker(
             ClientNetworkEvent::Disconnected => {
                 println!("[Orchestrator] Déconnecté du Broker !");
             }
-            ClientNetworkEvent::DataReceived { stream: _, payload } => {
-                let discard_message = BrokerMessageHeaders::DiscardedMessageBecauseYouKnow as u8;
-                let header_byte = payload.first().unwrap_or(&discard_message);
-                let header = BrokerMessageHeaders::from(*header_byte);
-                match header {
-                    BrokerMessageHeaders::Heartbeat => {
-                        let heartbeat_len = payload
-                            .get(1..3)
-                            .unwrap_or_default()
-                            .try_into()
-                            .unwrap_or([0, 0]);
-                        let heartbeat_len = u16::from_le_bytes(heartbeat_len) as usize;
-
-                        let heartbeat_payload = payload.get(3..(3 + heartbeat_len)).unwrap_or_default();
-
-                        match serde_json::from_slice::<Heartbeat>(heartbeat_payload) {
-                            Ok(heartbeat) => on_heartbeat_received(redis, heartbeat).await?,
+            ClientNetworkEvent::DataReceived { client_id : _, stream: _, payload } => {
+                match payload.header {
+                    GameMessageHeaders::Heartbeat => {
+                        let heartbeat = payload.extract::<HeartbeatMessage>();
+                        match heartbeat {
+                            Ok(heartbeat) => {
+                                on_heartbeat_received(redis, heartbeat.heartbeat).await?;
+                            }
                             Err(e) => {
-                                eprintln!("Invalid heartbeat JSON : {}", e)
+                                println!("[Orchestrator] Heartbeat error: {}", e);
                             }
                         }
                     }

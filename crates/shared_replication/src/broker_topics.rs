@@ -2,7 +2,6 @@
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum SecurityDomain {
@@ -40,8 +39,8 @@ pub enum Namespace {
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 
-    ServerLine = 0x32,      // Direct comm to a server
-    ClientLine = 0x33,      // Direct line to a client
+    ServerLine = 0x32, // Direct comm to a server
+    ClientLine = 0x33, // Direct line to a client
 }
 
 impl TryFrom<u8> for Namespace {
@@ -56,7 +55,7 @@ impl TryFrom<u8> for Namespace {
             0x31 => Ok(Self::Heartbeat),
             0x32 => Ok(Self::ServerLine),
 
-            _=> Err("Namespace inconnu"),
+            _ => Err("Namespace inconnu"),
         }
     }
 }
@@ -103,7 +102,7 @@ impl TopicBuilder {
     pub fn append_entity(mut self, entity: u32) -> Self {
         let entity_bytes = entity.to_le_bytes();
         let ci = self.current_index as usize;
-        self.buffer[ci..(ci+4)].copy_from_slice(&entity_bytes);
+        self.buffer[ci..(ci + 4)].copy_from_slice(&entity_bytes);
         self.current_index = (ci + 4) as u8;
         self
     }
@@ -111,7 +110,7 @@ impl TopicBuilder {
     pub fn append_lod(mut self, lod: u16) -> Self {
         let lod_bytes = lod.to_le_bytes();
         let ci = self.current_index as usize;
-        self.buffer[ci..(ci+2)].copy_from_slice(&lod_bytes);
+        self.buffer[ci..(ci + 2)].copy_from_slice(&lod_bytes);
         self.current_index = (ci + 2) as u8;
         self
     }
@@ -122,17 +121,19 @@ impl TopicBuilder {
         let y_bytes = cell_y.to_le_bytes();
         let mut ci = self.current_index as usize;
         // On place X de l'octet 4 à 7, et Y de 8 à 11
-        self.buffer[ci..(ci+4)].copy_from_slice(&x_bytes);
+        self.buffer[ci..(ci + 4)].copy_from_slice(&x_bytes);
         ci += 4;
-        self.buffer[ci..(ci+4)].copy_from_slice(&y_bytes);
+        self.buffer[ci..(ci + 4)].copy_from_slice(&y_bytes);
         self.current_index = (ci + 4) as u8;
         self
     }
     pub fn append(mut self, sub_topic: &[u8]) -> Self {
         let length = sub_topic.len();
-        let remaing_space = 32 - self.buffer.len();
-        let fill_in = min(length, remaing_space);
         let idx = self.current_index as usize;
+
+        let remaing_space = 32 - idx;
+
+        let fill_in = min(length, remaing_space);
 
         self.buffer[idx..idx + fill_in].copy_from_slice(&sub_topic[..fill_in]);
         self.current_index += fill_in as u8;
@@ -142,52 +143,5 @@ impl TopicBuilder {
     /// Finalise la construction
     pub fn build(self) -> Topic {
         self.buffer
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug)]
-//ce que les clients peuvent recevoir.
-pub enum BrokerMessageHeaders {
-    Snapshot = 0x04,    //the shards broadcast the state of the world
-    ClientInput = 0x05, //client to Shard
-
-    BrokerBrodcastClientHello = 0x06,      //Broker broadcast the client Hello.
-    SpawnClient = 0x07,      //broker tells shard to spawn a client
-    ClientWelcome = 0x08,    //broker to client
-    ClientDisconnect = 0x09, //broker to ...
-    ClientLocation = 0x0A,   //just the location of the player, broadcasted by shards.
-    Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
-
-    FriendHello = 0x0F, //When something that isn't a client says hello.
-
-    //inter shard protocol
-   TakeChunk = 0x10,
-
-    DiscardedMessageBecauseYouKnow,
-}
-
-//create BrokerMessageHeaderFrom u8 :
-impl From<u8> for BrokerMessageHeaders {
-    fn from(value: u8) -> Self {
-        match value {
-            0x04 => BrokerMessageHeaders::Snapshot,
-            0x05 => BrokerMessageHeaders::ClientInput,
-
-            0x06 => BrokerMessageHeaders::BrokerBrodcastClientHello,
-            0x07 => BrokerMessageHeaders::SpawnClient,
-            0x08 => BrokerMessageHeaders::ClientWelcome,
-            0x09 => BrokerMessageHeaders::ClientDisconnect,
-
-            0x0A => BrokerMessageHeaders::ClientLocation,
-            0x0B => BrokerMessageHeaders::Heartbeat,
-
-            0x0F => BrokerMessageHeaders::FriendHello,
-
-            0x10 => BrokerMessageHeaders::TakeChunk,
-
-
-            _ => BrokerMessageHeaders::DiscardedMessageBecauseYouKnow,
-        }
     }
 }

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use shared_replication::broker_message::ClientId;
-use shared_replication::client_server;
+use shared_replication::msg_client_server;
 
 #[derive(Message, Debug)]
 pub struct PlayerConnected {
@@ -17,7 +17,7 @@ pub struct PlayerDisconnected {
 #[derive(Message, Debug)]
 pub struct PlayerInputEvent {
     pub client_id: ClientId,
-    pub input_data: client_server::PlayerInput,
+    pub input_data: msg_client_server::PlayerInput,
 }
 
 #[derive(Debug)]

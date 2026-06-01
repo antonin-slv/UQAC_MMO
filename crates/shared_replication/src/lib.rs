@@ -2,14 +2,14 @@
 use serde::{Deserialize, Serialize};
 
 pub mod redis_manager;
-pub mod client_server;
+pub mod msg_client_server;
 pub mod math;
 pub mod broker_topics;
-pub mod broker_protocol;
 pub mod broker_client;
 pub mod broker_message;
-pub mod servers;
-
+pub mod msg_game_payload;
+pub mod msg_dgs;
+pub mod msg_servers;
 pub const STREAM_HANDSHAKE: u16 = 0;
 pub const STREAM_SNAPSHOTS: u16 = 100;
 pub const STREAM_INPUTS: u16 = 101;
@@ -21,19 +21,6 @@ pub const STREAM_HEARTBEAT: u16 = 102;
 // SERVER - ORCHESTRATOR COMMUNICATION
 //
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Heartbeat {
-    pub id: String,
-    pub zone: String,
-    pub player_count: usize,
-    pub max_players: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BrokerFriends {
-
-}
-
 //Data of the server
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(crate = "rocket::serde")]
@@ -41,16 +28,6 @@ pub struct ServerInfo {
     pub ip: String,
     pub port: u16,
     pub zone: String,
-}
-
-//
-// ...
-//
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum NetMessages {
-    JOIN(String),         //sent by a client to join a server,
-    WELCOME(String),      //Server welcomes client with the uuid of the client
-    HEARTBEAT(Heartbeat), //server send this to the orchestrator
 }
 
 // Client + Gatekeeper

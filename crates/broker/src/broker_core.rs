@@ -1,15 +1,14 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
-use nohash_hasher::IntSet;
+﻿use nohash_hasher::IntSet;
 use rustc_hash::FxHashMap;
 use std::env;
 use uuid::Uuid;
 
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
+use shared_replication::broker_message::BrokerMessage::{BroadCastFromClient, Broadcast};
 use shared_replication::broker_message::{BrokerMessage, ClientId};
 use shared_replication::broker_topics;
-use shared_replication::broker_topics::{BrokerMessageHeaders, SecurityDomain, Topic, TopicBuilder, TopicInterface};
-
+use shared_replication::broker_topics::{SecurityDomain, Topic, TopicInterface};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
@@ -212,36 +211,18 @@ impl Broker {
                             || topic.namespace() == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
                             // Le client a son badge, il peut publier ses inputs
-                            self.route_message(client_id, topic, payload, stream, false);
+                            self.route_message(
+                                BroadCastFromClient { client_id, payload },
+                                topic,
+                                stream,
+                                false,
+                            );
                         } else {
                             eprintln!(
                                 "[SÉCURITÉ] Client {} a tenté de publier sur {:?} sans être authentifié !",
                                 client_id, topic
                             );
                         }
-                    }
-                    BrokerMessage::ClientBrokerHello { payload } => {
-                        let pseudo = String::from_utf8_lossy(&payload);
-                        println!(
-                            "👋 [RÉSEAU PUBLIC] Nouveau client dit bonjour avec le pseudo : {}",
-                            pseudo
-                        );
-
-                        let topic = TopicBuilder::new(
-                            SecurityDomain::PrivateReadPublicWrite,
-                            broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
-                        )
-                        .build();
-
-                        println!(
-                            "🔑 [Auth] Broadcasting Hello of client {} avec le pseudo '{}'",
-                            client_id, pseudo
-                        );
-                        let mut new_payload = BytesMut::new();
-                        new_payload.put_u8(BrokerMessageHeaders::BrokerBrodcastClientHello as u8);
-                        new_payload.put_u32_le(client_id);
-                        new_payload.put_slice(pseudo.as_bytes());
-                        self.route_message(client_id, topic, new_payload.freeze(), stream, true);
                     }
                     _ => {
                         eprintln!(
@@ -319,7 +300,8 @@ impl Broker {
                     }
                     BrokerMessage::Publish { topic, payload } => {
                         // Le paramètre client_id est mis à 0 pour signifier "Envoyé par le système"
-                        self.route_message(0, topic, payload, stream, false);
+
+                        self.route_message(Broadcast { payload }, topic, stream, false);
                     }
 
                     BrokerMessage::AuthorizeClient { client_id } => {
@@ -379,20 +361,17 @@ impl Broker {
     /// empêcher le joueur de recevoir en écho ses propres paquets de mouvement.
     fn route_message(
         &self,
-        _sender_id: ClientId,
+        message: BrokerMessage,
         topic: Topic,
-        payload: Bytes,
         stream: GameStream,
         debug_print: bool,
     ) {
-        let broadcast = BrokerMessage::Broadcast { payload };
-        let final_bytes = broadcast.serialize();
+        let final_bytes = message.serialize();
 
         // 1. Envoyer aux serveurs internes (Shards, IA, Director)
         if let Some(servers) = self.internal_subscribers.get(&topic) {
             for &uuid in servers {
                 if let Some(conn) = self.uuid_to_internal_conn.get(&uuid) {
-
                     if debug_print {
                         println!("\t to {}", uuid);
                     }

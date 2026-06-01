@@ -5,11 +5,9 @@ mod structs;
 use crate::launcher::LauncherPlugin;
 use crate::structs::{ClientState, LocalPlayer};
 use bevy::prelude::*;
-use bytes::{BufMut, BytesMut};
-use shared_replication::broker_topics::{
-    BrokerMessageHeaders, Namespace, SecurityDomain, TopicBuilder,
-};
-use shared_replication::client_server::*;
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+
+use shared_replication::msg_client_server::*;
 
 #[derive(Bundle)]
 pub struct CameraBundle {
@@ -73,17 +71,10 @@ fn capture_inputs(
         current_input.set_right(true);
     }
 
-    // On sérialise et on envoie directement avec la lib
-    let current_input = PlayerInput::to_u8_slice(&current_input);
-    let mut input_for_net: Input = [0; 16].into();
-    input_for_net[0..2].copy_from_slice(&current_input); //dégueu... mais il faut avancer.
-    let header = BrokerMessageHeaders::ClientInput as u8;
-    let id = local_player.net_id;
-
-    let mut packet = BytesMut::with_capacity(1 + 4 + input_for_net.len());
-    packet.put_u8(header);
-    packet.put_u32_le(id);
-    packet.put_slice(&input_for_net);
+    let msg = PlayerInputMsg {
+        client_id: local_player.net_id,
+        input_data: current_input,
+    };
 
     let input_topic = TopicBuilder::new(
         SecurityDomain::PrivateReadPublicWrite,
@@ -91,7 +82,5 @@ fn capture_inputs(
     )
     .append_grid(local_player.x_chunk, local_player.y_chunk) //todo : recevoir ses chunk et publier dessus.
     .build();
-    broker_client
-        .client
-        .publish_unreliable(input_topic, packet.freeze());
+    broker_client.client.publish_unreliable(input_topic, &msg);
 }

@@ -3,16 +3,15 @@
 use crate::events;
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
-use bytes::{BufMut, Bytes, BytesMut};
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
-use shared_replication::Heartbeat;
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use shared_replication::broker_message::ClientId;
-use shared_replication::broker_topics::{
-    BrokerMessageHeaders, Namespace, SecurityDomain, TopicBuilder,
-};
-use shared_replication::client_server::*;
-use shared_replication::servers::ServerType;
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use shared_replication::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
+
+use shared_replication::msg_client_server::*;
+use shared_replication::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
@@ -191,23 +190,13 @@ fn send_heartbeat_system(
             max_players: server_info.max_players,
         };
 
-        if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
-            let data_len = json_bytes.len();
-            let data_len_u8 = (data_len as u16).to_le_bytes() as [u8; 2];
+        let heartbeat = HeartbeatMessage { heartbeat };
 
-            let mut data = BytesMut::with_capacity(1 + 2 + data_len);
-            data.put_u8(BrokerMessageHeaders::Heartbeat as u8);
-            data.put_slice(&data_len_u8);
-            data.put_slice(&json_bytes);
-
-            // On publie le heartbeat sur un topic réservé à l'orchestrateur (Director)
-            let topic_heartbeat =
-                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-
-            broker
-                .client
-                .publish_unreliable(topic_heartbeat, data.freeze());
-        }
+        let topic_heartbeat =
+            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
+        broker
+            .client
+            .publish_unreliable(topic_heartbeat, &heartbeat);
     }
 }
 
@@ -238,24 +227,21 @@ fn network_bridge_system(
                 let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerLine)
                     .append(server_info.uuid.as_bytes())
                     .build();
-
+                println!("[Server] Souscription au topic direct du serveur : {:?}", my_topic);
                 broker_connect.subscribe(my_topic, 0);
 
                 println!("[Server] Abonnement au topic Director Effectué.");
 
-                // 2. Envoi du paquet Hello / Registration
-                let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
-                let friend_type = ServerType::Server as u8;
-                let mut data = BytesMut::with_capacity(2 + 16);
-                data.put_u8(hello_packet_header);
-                data.put_u8(friend_type);
-                data.put_slice(server_info.uuid.as_bytes());
+                let msg = ServerHelloMSG {
+                    server_type: ServerType::Server,
+                    id: server_info.uuid.as_u128(),
+                };
 
                 // On envoie le Hello sur le topic d'authentification des serveurs
                 let auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                         .build();
-                broker_connect.publish_reliable(auth_topic, data.freeze());
+                broker_connect.publish_reliable(auth_topic, &msg);
             }
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
@@ -264,7 +250,7 @@ fn network_bridge_system(
                 panic!("Disconnected from broker (this is bad)");
             }
 
-            ClientNetworkEvent::DataReceived { stream: _, payload } => {
+            ClientNetworkEvent::DataReceived { client_id : _, stream: _, payload } => {
                 // Le payload pur arrive ici, expurgé du topic par le broker
                 route_message_events(
                     payload,
@@ -281,87 +267,87 @@ fn network_bridge_system(
 
 /// Gère l'aiguillage des flux de données purs (sans logique de Topic, gérée en amont)
 fn route_message_events(
-    data: Bytes,
+    payload: GamePayload,
     _broker_connect: &MmoNetworkClient,
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
-    _msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
+    msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
     msg_chunk_assigned: &mut MessageWriter<ChunkAssignedEvent>,
 ) {
-    if data.is_empty() {
-        eprintln!("[Server] Received empty payload from broker, ignoring.");
-        return;
-    }
-    let header_byte = data.first().unwrap();
-    let header = BrokerMessageHeaders::from(*header_byte);
-
-    let mut process_message = || -> Option<()> {
-        match header {
-            BrokerMessageHeaders::ClientInput => {
-                println!("[Server] ClientInput message received");
-                let client_id = ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let input: Input = data.get(5..(5 + 16))?.try_into().ok()?;
-
-                let input = PlayerInput::make_from_u8_slice(input.get(0..2)?)?;
-                println!("\t and forwarded to gameplay systems");
-
-                msg_input.write(PlayerInputEvent {
-                    client_id,
-                    input_data: input,
-                });
-
-                Some(())
-            }
-
-            BrokerMessageHeaders::SpawnClient => {
-                println!("[Server] SpawnClient message received");
-                let client_id = ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let pseudo_len = data.get(5..6)?.first().cloned()? as usize;
-                let pseudo_end = 6 + pseudo_len;
-                let pseudo = data.get(6..pseudo_end)?;
-
-                let pseudo = std::str::from_utf8(pseudo).ok();
-                let pseudo: String = pseudo.unwrap_or_else(|| "Unknown".into()).to_string();
-
-                msg_connected.write(PlayerConnected {
-                    client_id,
-                    player_name: pseudo,
-                });
-
-                Some(())
-            }
-
-            BrokerMessageHeaders::ClientDisconnect => {
-                _msg_disconnected.write(PlayerDisconnected {
-                    client_id: ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?),
-                });
-                Some(())
-            } /*
-            order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
-            order.put_i32_le(0); // Chunk X
-            order.put_i32_le(0); // Chunk Y */
-            BrokerMessageHeaders::TakeChunk => {
-                println!("[Server] TakeChunk message received");
-                //on doit se subscribe aux inputs de ce chunk :
-                let x = i32::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let y = i32::from_le_bytes(data.get(5..9)?.try_into().ok()?);
-
-                msg_chunk_assigned.write(ChunkAssignedEvent {
-                    chunk: events::GameChunk { x, y },
-                });
-                Some(())
-            }
-            _ => {
-                println!(
-                    "[Server] Unrecognized message header received: {:?} (raw: {})",
-                    header, header_byte
-                );
-                None
+    match payload.header {
+        GameMessageHeaders::ClientInput => {
+            let rslt = PlayerInputMsg::deserialize(&payload.data);
+            match rslt {
+                Ok(msg) => {
+                    msg_input.write(PlayerInputEvent {
+                        client_id: msg.client_id, // Ou le sender_id du broker !
+                        input_data: msg.input_data,
+                    });
+                }
+                Err(e) => {
+                    println!("[Server] Erreur de parsing du message ClientInput : {}", e);
+                }
             }
         }
-    };
 
-    if process_message().is_none() {
-        eprintln!("[Server] Une erreur ou un message non reconnu a été reçu sur le réseau");
+        GameMessageHeaders::SpawnClient => {
+            let msg = SpawnClientMsg::deserialize(&payload.data); // Juste pour le debug, on refait le parsing dans la logique métier
+
+            match msg {
+                Ok(msg_input) => {
+                    msg_connected.write(PlayerConnected {
+                        client_id: msg_input.client_id, // Ou le sender_id du broker !
+                        player_name: msg_input.pseudo.clone(),
+                    });
+                }
+                Err(e) => {
+                    println!("[Server] Erreur de parsing du message SpawnClient : {}", e);
+                }
+            }
+        }
+
+        GameMessageHeaders::ClientDisconnect => {
+
+            let msg = ClientDisconnectedMsg::deserialize(&payload.data);
+
+            match msg {
+                Ok(msg_input) => {
+                    msg_disconnected.write(PlayerDisconnected {
+                        client_id: msg_input.client_id,
+                    });
+                }
+                Err(e) => {
+                    println!("[Server] Erreur de parsing du message ClientDisconnect : {}", e);
+                }
+            }
+
+
+        } /*
+        order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
+        order.put_i32_le(0); // Chunk X
+        order.put_i32_le(0); // Chunk Y */
+        GameMessageHeaders::TakeChunk => {
+            let msg = TakeChunkMessage::deserialize(&payload.data);
+
+            match msg {
+                Ok(msg_input) => {
+                    msg_chunk_assigned.write(ChunkAssignedEvent {
+                        chunk: events::GameChunk {
+                            x: msg_input.chunk_x,
+                            y: msg_input.chunk_y,
+                        },
+                    });
+                }
+                Err(e) => {
+                    println!("[Server] Erreur de parsing du message TakeChunk : {}", e);
+                }
+            }
+        }
+        _ => {
+            println!(
+                "[Server] Unrecognized message header received: {:?} (raw: {:?})",
+                payload.header, payload.data
+            );
+        }
     }
 }

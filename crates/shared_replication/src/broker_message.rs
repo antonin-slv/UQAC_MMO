@@ -1,6 +1,68 @@
-﻿use crate::broker_protocol::{ProtocolError, ProtocolTag};
-use crate::broker_topics::Topic;
+﻿use crate::broker_topics::Topic;
 use bytes::{BufMut, Bytes, BytesMut};
+use std::fmt;
+
+#[derive(Debug)]
+pub enum ProtocolError {
+    BufferTooShort {
+        expected: usize,
+        actual: usize,
+        context: &'static str,
+    },
+    UnknownTag(u8),
+    MalformedData(&'static str),
+}
+
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProtocolError::BufferTooShort {
+                expected,
+                actual,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Paquet tronqué [{}]. Attendu: {} octets, Reçu: {}",
+                    context, expected, actual
+                )
+            }
+            ProtocolError::UnknownTag(tag) => write!(f, "Tag de protocole inconnu : 0x{:02X}", tag),
+            ProtocolError::MalformedData(msg) => write!(f, "Données mal formées : {}", msg),
+        }
+    }
+}
+impl std::error::Error for ProtocolError {}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolTag {
+    Subscribe = 0x01,
+    Unsubscribe = 0x02,
+    Publish = 0x03,
+    Broadcast = 0x04,
+    BroadcastFromClient = 0x05,
+    AuthorizeClient = 0x06,
+    KickClient = 0x07,
+}
+
+impl TryFrom<u8> for ProtocolTag {
+    type Error = ProtocolError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x01 => Ok(Self::Subscribe),
+            0x02 => Ok(Self::Unsubscribe),
+            0x03 => Ok(Self::Publish),
+            0x04 => Ok(Self::Broadcast),
+            0x05 => Ok(Self::BroadcastFromClient),
+            0x06 => Ok(Self::AuthorizeClient),
+            0x07 => Ok(Self::KickClient),
+
+            _ => Err(ProtocolError::UnknownTag(value)),
+        }
+    }
+}
 
 //ID d'un client connecté au broker
 pub type ClientId = u32;
@@ -11,9 +73,9 @@ pub enum BrokerMessage {
     Unsubscribe { client_id: ClientId, topic: Topic },
     Publish { topic: Topic, payload: Bytes },
     Broadcast { payload: Bytes },
+    BroadCastFromClient { client_id: ClientId, payload: Bytes },
     AuthorizeClient { client_id: ClientId },
     KickClient { client_id: ClientId },
-    ClientBrokerHello { payload : Bytes},
 }
 
 impl BrokerMessage {
@@ -26,9 +88,9 @@ impl BrokerMessage {
             Self::Unsubscribe { .. } => ProtocolTag::Unsubscribe,
             Self::Publish { .. } => ProtocolTag::Publish,
             Self::Broadcast { .. } => ProtocolTag::Broadcast,
+            Self::BroadCastFromClient { .. } => ProtocolTag::BroadcastFromClient,
             Self::AuthorizeClient { .. } => ProtocolTag::AuthorizeClient,
             Self::KickClient { .. } => ProtocolTag::KickClient,
-            Self::ClientBrokerHello { .. } => ProtocolTag::ClientBrokerHello,
         }
     }
 
@@ -38,8 +100,8 @@ impl BrokerMessage {
             ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => 1 + 4 + 32, // Tag(1) + ID(4) + Topic(32)
             ProtocolTag::Publish => 1 + 32 + 2, // Tag(1) + Topic(32) + Len(2) + [Payload]
             ProtocolTag::Broadcast => 1 + 2,    // Tag(1) + Len(2) + [Payload]
+            ProtocolTag::BroadcastFromClient => 1 + 4 + 2, //tag + clientID + [Payload]
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => 1 + 4, // Tag(1) + ID(4)
-            ProtocolTag::ClientBrokerHello => 1, // Client -> Broker Tag(1) + PSEUDO
         }
     }
 
@@ -115,6 +177,34 @@ impl BrokerMessage {
                     })
                 }
             }
+            ProtocolTag::BroadcastFromClient => {
+                if data.len() <= min_len {
+                    return Err(ProtocolError::BufferTooShort {
+                        expected: min_len + 1, // Au moins 1 octet de payload
+                        actual: data.len(),
+                        context: "Lecture du \"header\" (BroadcastFromClient)",
+                    });
+                }
+                let client_id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                // 2. La taille (2 octets de 4 à 6)
+                let payload_len = u16::from_le_bytes(payload[4..6].try_into().unwrap()) as usize;
+
+                if data.len() >= min_len + payload_len {
+                    // 3. Les données (à partir de 6)
+                    let playload = Bytes::copy_from_slice(&payload[6..6 + payload_len]);
+
+                    Ok(Self::BroadCastFromClient {
+                        client_id,
+                        payload: playload,
+                    })
+                } else {
+                    Err(ProtocolError::BufferTooShort {
+                        expected: min_len + payload_len,
+                        actual: data.len(),
+                        context: "Lecture du payload dynamique (BroadcastClientConnected)",
+                    })
+                }
+            }
 
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => {
                 let client_id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
@@ -123,12 +213,6 @@ impl BrokerMessage {
                 } else {
                     Ok(Self::KickClient { client_id })
                 }
-            }
-
-            ProtocolTag::ClientBrokerHello => {
-                Ok(Self::ClientBrokerHello {
-                    payload: payload[..].to_owned().into(),
-                })
             }
         }
     }
@@ -152,15 +236,16 @@ impl BrokerMessage {
                 buf.put_u16_le(payload.len() as u16);
                 buf.put_slice(payload);
             }
+            Self::BroadCastFromClient { client_id, payload } => {
+                buf.put_u32_le(*client_id);
+                buf.put_u16_le(payload.len() as u16);
+                buf.put_slice(payload);
+            }
             Self::AuthorizeClient { client_id } => {
                 buf.put_u32_le(*client_id);
             }
             Self::KickClient { client_id } => {
                 buf.put_u32_le(*client_id);
-            }
-            Self::ClientBrokerHello { payload } => {
-                buf.put_u32_le(payload.len() as u32);
-                buf.put_slice(payload);
             }
         }
         buf.freeze()

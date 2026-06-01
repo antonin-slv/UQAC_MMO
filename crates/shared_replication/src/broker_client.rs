@@ -1,6 +1,6 @@
 ﻿use crate::broker_message::{BrokerMessage, ClientId};
 use crate::broker_topics::Topic;
-use bytes::Bytes;
+use crate::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
 use game_sockets::GameSocketError;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
@@ -13,8 +13,9 @@ pub enum ClientNetworkEvent {
     Disconnected,
     /// Les données brutes reçues
     DataReceived {
+        client_id: ClientId,
         stream: GameStream,
-        payload: Bytes,
+        payload: GamePayload,
     },
 }
 
@@ -71,7 +72,33 @@ impl MmoNetworkClient {
                 Ok(Some(GameNetworkEvent::Message { stream, data, .. })) => {
                     match BrokerMessage::deserialize(data) {
                         Ok(BrokerMessage::Broadcast { payload }) => {
-                            return Some(ClientNetworkEvent::DataReceived { stream, payload });
+                            if payload.is_empty() {
+                                continue;
+                            }
+
+                            let header = GameMessageHeaders::from(payload[0]);
+                            let data = payload.slice(1..); // Tranche ultra rapide
+
+                            return Some(ClientNetworkEvent::DataReceived {
+                                client_id: 0,
+                                stream,
+                                payload: GamePayload { header, data },
+                            });
+                        }
+
+                        Ok(BrokerMessage::BroadCastFromClient { client_id, payload }) => {
+                            if payload.is_empty() {
+                                continue;
+                            }
+
+                            let header = GameMessageHeaders::from(payload[0]);
+                            let data = payload.slice(1..); // Tranche ultra rapide
+
+                            return Some(ClientNetworkEvent::DataReceived {
+                                client_id,
+                                stream,
+                                payload: GamePayload { header, data },
+                            });
                         }
                         Err(e) => {
                             eprintln!("[BrokerClient] Erreur de parsing du message: {}", e);
@@ -123,14 +150,6 @@ impl MmoNetworkClient {
         }
     }
 
-    // --- API D'ÉMISSION ---
-    pub fn actual_game_client_not_server_say_hello(&self, pseudo : String) {
-        let msg = BrokerMessage::ClientBrokerHello {
-            payload: Bytes::from(pseudo),
-        };
-        self.send_internal(&self.stream_reliable, msg);
-    }
-
     pub fn authorize_client(&self, target_client: ClientId) {
         let msg = BrokerMessage::AuthorizeClient {
             client_id: target_client,
@@ -165,13 +184,23 @@ impl MmoNetworkClient {
     }
 
     /// Publie une donnée sur un topic. Le choix du stream dépend du besoin.
-    pub fn publish_unreliable(&self, topic: Topic, payload: Bytes) {
+    pub fn publish_unreliable<T: GameMessage>(&self, topic: Topic, message: &T) {
+        let payload = GamePayload {
+            header: T::header(),
+            data: message.serialize(),
+        }
+        .to_network_bytes();
         let msg = BrokerMessage::Publish { topic, payload };
         self.send_internal(&self.stream_unreliable, msg);
     }
 
     /// Publie une donnée critique (ex: Achat, Handoff).
-    pub fn publish_reliable(&self, topic: Topic, payload: Bytes) {
+    pub fn publish_reliable<T: GameMessage>(&self, topic: Topic, message: &T) {
+        let payload = GamePayload {
+            header: T::header(),
+            data: message.serialize(),
+        }
+        .to_network_bytes();
         let msg = BrokerMessage::Publish { topic, payload };
         self.send_internal(&self.stream_reliable, msg);
     }
