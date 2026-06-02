@@ -4,13 +4,13 @@ use shared_replication::broker_topics::{
 };
 use shared_replication::msg_game_payload::GameMessageHeaders;
 
-use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
-use std::env;
-use std::time::Duration;
 use bollard::Docker;
 use shared_replication::broker_message::NodeId;
 use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use shared_replication::msg_dgs::{SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_dgs::{GameChunk, SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use std::env;
+use std::time::Duration;
 
 async fn get_ip_of_named_container(docker: &Docker, container_name: &str) -> Option<String> {
     let inspect_result = docker.inspect_container(container_name, None).await;
@@ -81,7 +81,10 @@ pub async fn run_spatial_auth_server() {
                     broker_api.subscribe(auth_private.clone(), 0);
 
                     // 2. S'abonner pour entendre les requêtes de Login des vrais joueurs
-                    println!("[Spatial/auth] Subscribing to {:?}", auth_public_listen.clone());
+                    println!(
+                        "[Spatial/auth] Subscribing to {:?}",
+                        auth_public_listen.clone()
+                    );
                     broker_api.subscribe(auth_public_listen.clone(), 0);
                 }
                 ClientNetworkEvent::Connected => {
@@ -132,8 +135,7 @@ pub async fn run_spatial_auth_server() {
 
                                 if active_dgs.len() == 1 {
                                     let msg = TakeChunkMessage {
-                                        chunk_x: 0,
-                                        chunk_y: 0,
+                                        game_chunk: GameChunk { x: 0, y: 0 },
                                     };
 
                                     broker_api.publish_reliable(topic, &msg);
@@ -194,12 +196,13 @@ pub async fn run_spatial_auth_server() {
                                     .append_id(client_id)
                                     .build();
                             broker_api.subscribe(specific_client_topic.clone(), client_id);
+                            let chunk = GameChunk { x: 0, y: 0 };
 
                             let chunk_0_0_state = TopicBuilder::new(
                                 SecurityDomain::PublicReadPrivateWrite,
                                 Namespace::Chunk,
                             )
-                            .append_grid(0, 0)
+                            .append_chunk(&chunk)
                             .build();
 
                             broker_api.subscribe(chunk_0_0_state, client_id);
@@ -220,17 +223,12 @@ pub async fn run_spatial_auth_server() {
                             let msg = SpawnClientMsg {
                                 client_id,
                                 pseudo: msg.pseudo.to_string(),
-                                chunk_x: 0,
-                                chunk_y: 0,
+                                chunk: chunk.clone(),
                             };
 
                             broker_api.publish_reliable(server_topic, &msg);
 
-                            let msg = ClientWelcomeMsg {
-                                client_id,
-                                chunk_x: 0,
-                                chunk_y: 0,
-                            };
+                            let msg = ClientWelcomeMsg { client_id, chunk };
                             broker_api.publish_reliable(specific_client_topic, &msg);
                         }
 

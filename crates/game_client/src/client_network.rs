@@ -56,7 +56,6 @@ fn network_bridge_system(
 ) {
     while let Some(event) = net.client.poll() {
         match event {
-            // ÉTAPE 1 : Connecté au Broker. On envoie immédiatement le Handshake
             ClientNetworkEvent::Ready => {
                 local_player.net_id = net.client.node_id.unwrap_or(0);
                 println!("[Client] Client prêt. Envoi du Handshake...");
@@ -93,8 +92,7 @@ fn network_bridge_system(
                     let msg = payload.extract::<ClientWelcomeMsg>();
                     match msg {
                         Ok(msg) => {
-                            local_player.y_chunk = msg.chunk_y;
-                            local_player.x_chunk = msg.chunk_x;
+                            local_player.chunk = msg.chunk;
                             local_player.net_id = msg.client_id;
                             println!("[Client] Got welcome message (ID: {})", msg.client_id);
                             next_state.set(ClientState::InGame);

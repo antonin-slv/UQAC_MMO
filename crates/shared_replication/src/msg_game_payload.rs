@@ -7,11 +7,11 @@ pub enum GameMessageHeaders {
     Snapshot = 0x04,    //the shards broadcast the state of the world
     ClientInput = 0x05, //client to Shard
 
-    ClientHello = 0x06, //Broker broadcast the client Hello.
-    SpawnClient = 0x07,               //broker tells shard to spawn a client
-    ClientWelcome = 0x08,             //broker to client
-    ClientDisconnect = 0x09,          //broker to ...
-    Heartbeat = 0x0B,                 //from shard => broker then broker => Orchestrator
+    ClientHello = 0x06,      //Broker broadcast the client Hello.
+    SpawnClient = 0x07,      //broker tells shard to spawn a client
+    ClientWelcome = 0x08,    //broker to client
+    ClientDisconnect = 0x09, //broker to ...
+    Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
 
     FriendHello = 0x0F, //When something that isn't a client says hello.
 
@@ -46,17 +46,24 @@ impl From<u8> for GameMessageHeaders {
 
 /// Le contrat que chaque message du jeu doit respecter.
 /// Il peut être défini n'importe où dans tes fichiers !
-pub trait GameMessage: Sized {
+pub trait GameMessage: Sized + NetWrite + NetRead {
     /// Quel est l'octet d'en-tête de ce message ?
     fn header() -> GameMessageHeaders;
+}
 
-    /// Transforme la structure en octets (SANS l'en-tête)
+pub trait NetWrite {
+    /// Transforme la structure en octets
     fn serialize(&self) -> Bytes;
+}
 
-    /// Reconstruit la structure à partir des octets (SANS l'en-tête)
+pub trait NetRead: Sized {
+    /// Reconstruit la structure à partir des octets
     fn deserialize(data: &mut Bytes) -> Result<Self, String>;
 }
 
+pub trait NetWriteTo {
+    fn write_to(&self, buf: &mut BytesMut);
+}
 /// L'enveloppe renvoyée par le BrokerClient
 #[derive(Debug, Clone)]
 pub struct GamePayload {

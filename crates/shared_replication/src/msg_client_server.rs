@@ -1,7 +1,8 @@
 ﻿// -- les différents streams de données
 
 use crate::broker_message::NodeId;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
+use crate::msg_dgs::GameChunk;
+use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rocket::serde::{Deserialize, Serialize};
 
@@ -25,11 +26,7 @@ pub struct SnapshotMsg {
     pub snapshot: PersonalSnapshot,
 }
 
-impl GameMessage for SnapshotMsg {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::Snapshot
-    }
-
+impl NetWrite for SnapshotMsg {
     fn serialize(&self) -> Bytes {
         let mut writer = BytesMut::new().writer();
         if let Err(e) = bincode::serialize_into(&mut writer, &self.snapshot) {
@@ -38,13 +35,21 @@ impl GameMessage for SnapshotMsg {
         }
         writer.into_inner().freeze()
     }
+}
 
+impl NetRead for SnapshotMsg {
     fn deserialize(data: &mut Bytes) -> Result<Self, String> {
         let mut reader = data.reader();
         match bincode::deserialize_from(&mut reader) {
             Ok(snapshot) => Ok(SnapshotMsg { snapshot }),
             Err(e) => Err(format!("Impossible de désérialiser le snapshot: {}", e)),
         }
+    }
+}
+
+impl GameMessage for SnapshotMsg {
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::Snapshot
     }
 }
 
@@ -55,18 +60,23 @@ pub struct PlayerInputMsg {
     pub client_id: NodeId,
     pub input_data: PlayerInput,
 }
+
 impl GameMessage for PlayerInputMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientInput
     }
+}
 
+impl NetWrite for PlayerInputMsg {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(6);
         buf.put_u32_le(self.client_id);
         buf.put_u16_le(self.input_data.0); // On écrit directement le u16 !
         buf.freeze()
     }
+}
 
+impl NetRead for PlayerInputMsg {
     fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
         if bytes.remaining() < 6 {
             return Err(format!(
@@ -83,7 +93,6 @@ impl GameMessage for PlayerInputMsg {
         })
     }
 }
-
 impl PlayerInput {
     pub fn make_from_u8_slice(slice: &[u8]) -> Option<Self> {
         if slice.len() != 2 {
@@ -137,17 +146,21 @@ impl PlayerInput {
 pub struct ClientDisconnectedMsg {
     pub client_id: u32,
 }
+
 impl GameMessage for ClientDisconnectedMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientDisconnect
     }
-
+}
+impl NetWrite for ClientDisconnectedMsg {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(4);
         buf.put_u32_le(self.client_id);
         buf.freeze()
     }
+}
 
+impl NetRead for ClientDisconnectedMsg {
     fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
         if bytes.remaining() < 4 {
             return Err("ClientDisconnectedMsg trop court".into());
@@ -159,38 +172,38 @@ impl GameMessage for ClientDisconnectedMsg {
 }
 pub struct ClientWelcomeMsg {
     pub client_id: u32,
-    pub chunk_x: i32,
-    pub chunk_y: i32,
+    pub chunk: GameChunk,
+}
+
+impl NetWrite for ClientWelcomeMsg {
+    fn serialize(&self) -> Bytes {
+        let mut data = BytesMut::with_capacity(12);
+        data.put_u32_le(self.client_id);
+        self.chunk.write_to(&mut data);
+        data.freeze()
+    }
+}
+
+impl NetRead for ClientWelcomeMsg {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        if data.len() != 8 {
+            return Err(format!(
+                "ClientWelcomeMsg doit être de 8 octets, trouvé {}",
+                data.len()
+            ));
+        }
+        let client_id = data.get_u32_le();
+        let chunk = match GameChunk::deserialize(data) {
+            Ok(chunk) => chunk,
+            Err(e) => return Err(format!("ClientWelcomeMsg : {}", e)),
+        };
+        Ok(Self { client_id, chunk })
+    }
 }
 
 impl GameMessage for ClientWelcomeMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientWelcome
-    }
-
-    fn serialize(&self) -> Bytes {
-        let mut data = BytesMut::with_capacity(12);
-        data.put_u32_le(self.client_id);
-        data.put_i32_le(self.chunk_x);
-        data.put_i32_le(self.chunk_y);
-        data.freeze()
-    }
-
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        if data.len() != 12 {
-            return Err(format!(
-                "ClientWelcomeMsg doit être de 12 octets, trouvé {}",
-                data.len()
-            ));
-        }
-        let client_id = data.get_u32_le();
-        let chunk_x = data.get_i32_le();
-        let chunk_y = data.get_i32_le();
-        Ok(Self {
-            client_id,
-            chunk_x,
-            chunk_y,
-        })
     }
 }
 
@@ -202,7 +215,9 @@ impl GameMessage for ClientHelloMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientHello
     }
+}
 
+impl NetWrite for ClientHelloMsg {
     fn serialize(&self) -> Bytes {
         let pseudo_bytes = self.pseudo.as_bytes();
         let mut buf = BytesMut::with_capacity(2 + pseudo_bytes.len());
@@ -210,7 +225,9 @@ impl GameMessage for ClientHelloMsg {
         buf.put_slice(pseudo_bytes);
         buf.freeze()
     }
+}
 
+impl NetRead for ClientHelloMsg {
     fn deserialize(data: &mut Bytes) -> Result<Self, String> {
         if data.remaining() < 2 {
             return Err("ClientHelloMsg trop court".into());

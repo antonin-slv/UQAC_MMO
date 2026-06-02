@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-// server/src/player.rs
 use crate::dgs_network::BrockerManager;
 pub(crate) use crate::dgs_network::{ControlledBy, NetworkId, NetworkIdGenerator};
 use crate::events;
-use crate::events::{AssignedChunks, GameChunk};
+use crate::events::AssignedChunks;
 use bevy::prelude::*;
 use shared_replication::broker_topics::SecurityDomain::PrivateReadPublicWrite;
 use shared_replication::broker_topics::{Namespace, TopicBuilder};
+use std::collections::HashMap;
 
 #[derive(Resource, Default)]
 pub struct ClientDirectory {
@@ -101,11 +100,9 @@ fn handle_chunkassignes(
     broker: ResMut<BrockerManager>,
 ) {
     for ev in ev_chunk.read() {
-        let x = ev.chunk.x;
-        let y = ev.chunk.y;
-        chunk_directory.chunk = Some(GameChunk { x, y });
+        chunk_directory.chunk = Some(ev.chunk.clone());
         let topic = TopicBuilder::new(PrivateReadPublicWrite, Namespace::SpatialInput)
-            .append_grid(x, y)
+            .append_chunk(&ev.chunk)
             .build();
         broker.client.subscribe(topic, 0);
     }

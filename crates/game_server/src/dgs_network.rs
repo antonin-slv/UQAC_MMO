@@ -330,12 +330,9 @@ fn route_message_events(
         },
 
         GameMessageHeaders::TakeChunk => match payload.extract::<TakeChunkMessage>() {
-            Ok(msg_input) => {
+            Ok(msg_take_chunk) => {
                 msg_chunk_assigned.write(ChunkAssignedEvent {
-                    chunk: events::GameChunk {
-                        x: msg_input.chunk_x,
-                        y: msg_input.chunk_y,
-                    },
+                    chunk: msg_take_chunk.game_chunk,
                 });
             }
             Err(e) => {

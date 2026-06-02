@@ -1,4 +1,5 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
+﻿use crate::msg_dgs::GameChunk;
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 
@@ -117,9 +118,9 @@ impl TopicBuilder {
     }
 
     /// Ajoute des coordonnées spatiales (X, Y) pour la grille d'AOI
-    pub fn append_grid(mut self, cell_x: i32, cell_y: i32) -> Self {
-        self.buffer.put_i32_le(cell_x);
-        self.buffer.put_i32_le(cell_y);
+    pub fn append_chunk(mut self, chunk: &GameChunk) -> Self {
+        self.buffer.put_i16_le(chunk.x);
+        self.buffer.put_i16_le(chunk.y);
         self
     }
     pub fn append(mut self, sub_topic: &[u8]) -> Self {

@@ -80,7 +80,7 @@ fn capture_inputs(
         SecurityDomain::PrivateReadPublicWrite,
         Namespace::SpatialInput,
     )
-    .append_grid(local_player.x_chunk, local_player.y_chunk) //todo : recevoir ses chunk et publier dessus.
+    .append_chunk(&local_player.chunk) //todo : recevoir ses chunk et publier dessus.
     .build();
     broker_client.client.publish_unreliable(input_topic, &msg);
 }

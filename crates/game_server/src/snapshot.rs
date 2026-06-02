@@ -54,7 +54,7 @@ fn broadcast_snapshots(
         personal_snapshot.entities.push(*target_snapshot);
     }
     let topic = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
-        .append_grid(chunk_assigned.x, chunk_assigned.y) //todo : faire une vraie grille d'AOI
+        .append_chunk(&chunk_assigned) //todo : faire une vraie grille d'AOI
         .build();
     let msg = SnapshotMsg {
         snapshot: personal_snapshot,
