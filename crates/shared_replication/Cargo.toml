@@ -11,3 +11,4 @@ anyhow = { workspace = true }
 rocket = { workspace = true }
 bytes = { workspace = true }
 game_sockets = { workspace = true }
+bincode = { workspace = true }

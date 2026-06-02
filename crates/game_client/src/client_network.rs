@@ -6,11 +6,12 @@ use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_message::ClientId;
 use shared_replication::broker_topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, BrokerMessageHeaders, SecurityDomain, TopicBuilder,
+    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, SecurityDomain, TopicBuilder,
 };
-use shared_replication::client_server::*;
+use shared_replication::msg_game_payload::GameMessageHeaders;
+
+use shared_replication::msg_client_server::*;
 #[derive(Component)]
 struct NetworkEntity(u32);
 
@@ -29,7 +30,6 @@ impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
         // 1. Initialisation de la librairie réseau unifiée
         let client = MmoNetworkClient::new();
-
         app.insert_resource(NetworkManager { client })
             .insert_resource(LocalPlayer::default())
             // Plus besoin de ServerConnection !
@@ -56,8 +56,8 @@ fn network_bridge_system(
 ) {
     while let Some(event) = net.client.poll() {
         match event {
-            // ÉTAPE 1 : Connecté au Broker. On envoie immédiatement le Handshake
             ClientNetworkEvent::Ready => {
+                local_player.net_id = net.client.node_id.unwrap_or(0);
                 println!("[Client] Client prêt. Envoi du Handshake...");
                 let topic_auth_recieve = TopicBuilder::new(
                     SecurityDomain::PublicReadPrivateWrite,
@@ -71,51 +71,47 @@ fn network_bridge_system(
                     .clone()
                     .unwrap_or("NO_PSEUDO".to_string());
                 // On publie de manière fiable
-                net.client.actual_game_client_not_server_say_hello(pseudo);
+
+                let topic = TopicBuilder::new(
+                    SecurityDomain::PrivateReadPublicWrite,
+                    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
+                )
+                .build();
+                let payload = ClientHelloMsg { pseudo };
+
+                net.client.publish_reliable(topic, &payload);
             }
 
             // ÉTAPE 2 : Réception des données du jeu
-            ClientNetworkEvent::DataReceived { stream: _, payload } => {
-                if payload.is_empty() {
-                    continue;
-                }
-
-                // Le payload est PUR (le broker a déjà retiré ses propres tags réseaux).
-                // Le 1er octet est donc forcément un tag métier du jeu (ClientWelcome, Snapshot, etc.)
-                let header_byte = payload[0];
-                let header = BrokerMessageHeaders::from(header_byte);
-
-                match header {
-                    BrokerMessageHeaders::ClientWelcome => {
-                        if payload.len() >= 5 {
-                            let id = ClientId::from_le_bytes(payload[1..5].try_into().unwrap());
-                            let x_chunk = i32::from_le_bytes(payload[5..9].try_into().unwrap());
-                            let y_chunk = i32::from_le_bytes(payload[9..13].try_into().unwrap());
-                            println!("[Client] Bienvenue ! Client ID : {}", id);
-                            local_player.net_id = id;
-                            local_player.pseudo = None;
-                            local_player.x_chunk = x_chunk;
-                            local_player.y_chunk = y_chunk;
+            ClientNetworkEvent::DataReceived {
+                client_id: _,
+                stream: _,
+                mut payload,
+            } => match payload.header {
+                GameMessageHeaders::ClientWelcome => {
+                    let msg = payload.extract::<ClientWelcomeMsg>();
+                    match msg {
+                        Ok(msg) => {
+                            local_player.chunk = msg.chunk;
+                            local_player.net_id = msg.client_id;
+                            println!("[Client] Got welcome message (ID: {})", msg.client_id);
                             next_state.set(ClientState::InGame);
                         }
-                    }
-
-                    // ⚠️ ATTENTION SUR CE POINT (Voir explication plus bas)
-                    // Puisqu'on ne vérifie plus le tag "Broadcast" du broker, il faut que ton serveur
-                    // ajoute un tag "Snapshot" au début des données qu'il envoie.
-                    BrokerMessageHeaders::Snapshot => {
-                        // On désérialise les données bincode juste après l'octet du header [1..]
-                        if let Ok(snapshot) =
-                            bincode::deserialize::<PersonalSnapshot>(&payload[1..])
-                        {
-                            msg_snapshot.write(SnapshotMessage(snapshot));
-                        } else {
-                            eprintln!("[Client] Erreur de désérialisation du snapshot");
+                        Err(e) => {
+                            println!("[Client] Got welcome error: {}", e);
                         }
                     }
-                    _ => {}
                 }
-            }
+                GameMessageHeaders::Snapshot => match payload.extract::<SnapshotMsg>() {
+                    Ok(snapshot) => {
+                        msg_snapshot.write(SnapshotMessage(snapshot.snapshot));
+                    }
+                    Err(e) => {
+                        eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
+                    }
+                },
+                _ => {}
+            },
 
             // ÉTAPE 3 : Déconnexion
             ClientNetworkEvent::Disconnected => {
@@ -137,6 +133,7 @@ fn process_snapshots(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut query_net_entities: Query<(Entity, &NetworkEntity, &mut Transform)>,
 ) {
+    let mut entity_to_spawn: Vec<EntitySnapshot> = Vec::new();
     // On récupère tout les snapshot reçu lors de cette frame
     for msg in reader.read() {
         let snapshot = msg.0.clone();
@@ -151,23 +148,26 @@ fn process_snapshots(
                 continue;
             }
 
-            println!(
-                "Nouvelle entité réseau découverte : {}",
-                net_entity.network_id
-            );
+            let index_of_spawnentity = entity_to_spawn
+                .iter()
+                .position(|e| e.network_id == net_entity.network_id);
+            if let Some(index) = index_of_spawnentity {
+                entity_to_spawn.remove(index);
+            }
 
-            commands.spawn((
-                PlayerBundle {
-                    mesh: Mesh2d(meshes.add(Circle::new(10.0))),
-                    material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-                    transform: Transform::from_xyz(
-                        net_entity.position[0],
-                        net_entity.position[1],
-                        0.0,
-                    ),
-                },
-                NetworkEntity(net_entity.network_id),
-            ));
+            entity_to_spawn.push(net_entity);
         }
+    }
+
+    for entity in entity_to_spawn {
+        println!("Nouvelle entité réseau découverte : {}", entity.network_id);
+        commands.spawn((
+            PlayerBundle {
+                mesh: Mesh2d(meshes.add(Circle::new(10.0))),
+                material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+                transform: Transform::from_xyz(entity.position[0], entity.position[1], 0.0),
+            },
+            NetworkEntity(entity.network_id),
+        ));
     }
 }

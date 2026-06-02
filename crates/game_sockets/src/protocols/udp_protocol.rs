@@ -38,7 +38,6 @@ impl GameSocketBackend for UdpBackend {
                         if matches!(cmd, BackendCommand::Shutdown) { break; }
                         self.process_command(cmd, &event_tx).await;
                     }
-
                     //Handle Network Traffic
                     res = recv_future => {
                         match res {

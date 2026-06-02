@@ -1,10 +1,9 @@
 // server/src/snapshot.rs
 use crate::dgs_network::{BrockerManager, NetworkId, ServerStats};
+use crate::events::AssignedChunks;
 use bevy::prelude::*;
-use bytes::Bytes;
-use shared_replication::broker_topics::{BrokerMessageHeaders, Namespace, SecurityDomain, TopicBuilder};
-use shared_replication::client_server::*;
-use crate::events::{AssignedChunks};
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use shared_replication::msg_client_server::*;
 
 const _AOI_RADIUS: f32 = 100.0;
 
@@ -23,9 +22,6 @@ fn broadcast_snapshots(
     chunk_assigned: ResMut<AssignedChunks>,
     query_all_entities: Query<(&NetworkId, &Transform)>,
 ) {
-
-
-
     if !net.client.is_connected() {
         return;
     }
@@ -40,8 +36,6 @@ fn broadcast_snapshots(
     if entity_count == 0 {
         return;
     }
-
-    let snapshot_header = BrokerMessageHeaders::Snapshot as u8;
 
     // Pré-calcul de l'état du monde ---
     let mut precomputed_targets = Vec::with_capacity(entity_count);
@@ -59,19 +53,11 @@ fn broadcast_snapshots(
     for (target_snapshot, _) in &precomputed_targets {
         personal_snapshot.entities.push(*target_snapshot);
     }
-
-    match bincode::serialize(&personal_snapshot) {
-        Ok(snapshot_as_bytes) => {
-            let topic = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
-                .append_grid(chunk_assigned.x, chunk_assigned.y) //todo : faire une vraie grille d'AOI
-                .build();
-
-            let mut payload = Vec::with_capacity(1 + snapshot_as_bytes.len());
-            payload.push(snapshot_header);
-            payload.extend(snapshot_as_bytes);
-            net.client
-                .publish_unreliable(topic, Bytes::from(payload));
-        }
-        Err(e) => eprintln!("Erreur de sérialisation bincode: {}", e),
-    }
+    let topic = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
+        .append_chunk(&chunk_assigned) //todo : faire une vraie grille d'AOI
+        .build();
+    let msg = SnapshotMsg {
+        snapshot: personal_snapshot,
+    };
+    net.client.publish_unreliable(topic, &msg);
 }

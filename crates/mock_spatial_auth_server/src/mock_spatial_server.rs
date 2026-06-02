@@ -1,15 +1,16 @@
-﻿use bytes::{BufMut, BytesMut};
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
+﻿use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use shared_replication::broker_topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, BrokerMessageHeaders, Namespace, SecurityDomain,
-    TopicBuilder,
+    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
 };
-use shared_replication::servers::ServerType;
-use std::env;
-use std::time::Duration;
-use uuid::Uuid;
+use shared_replication::msg_game_payload::GameMessageHeaders;
 
 use bollard::Docker;
+use shared_replication::broker_message::NodeId;
+use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
+use shared_replication::msg_dgs::{GameChunk, SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use std::env;
+use std::time::Duration;
 
 async fn get_ip_of_named_container(docker: &Docker, container_name: &str) -> Option<String> {
     let inspect_result = docker.inspect_container(container_name, None).await;
@@ -59,7 +60,7 @@ pub async fn run_spatial_auth_server() {
         .connect(broker_ip.as_ref(), broker_private_port)
         .expect("😡 No connexion to broker "); // Se connecte au port Privé (Confiance Totale)
 
-    let mut active_dgs: Vec<Uuid> = Vec::new();
+    let mut active_dgs: Vec<NodeId> = Vec::new();
 
     // Le cerveau écoute les annonces sur le canal d'Authentification (Serveurs et Joueurs)
     let auth_private =
@@ -77,10 +78,14 @@ pub async fn run_spatial_auth_server() {
                     println!("🌍 [Spatial/Auth] Connecté au Broker Privé avec succès.");
 
                     // 1. S'abonner pour entendre les "Hello" des nouveaux DGS
-                    broker_api.subscribe(auth_private, 0);
+                    broker_api.subscribe(auth_private.clone(), 0);
 
                     // 2. S'abonner pour entendre les requêtes de Login des vrais joueurs
-                    broker_api.subscribe(auth_public_listen, 0);
+                    println!(
+                        "[Spatial/auth] Subscribing to {:?}",
+                        auth_public_listen.clone()
+                    );
+                    broker_api.subscribe(auth_public_listen.clone(), 0);
                 }
                 ClientNetworkEvent::Connected => {
                     println!("🌍 [Spatial/Auth] Connecté au Broker (Still not ready)...");
@@ -94,89 +99,105 @@ pub async fn run_spatial_auth_server() {
 
                     let _ = broker_api.connect(host_adress.as_ref(), broker_private_port);
                 }
-                ClientNetworkEvent::DataReceived { stream: _, payload } => {
-                    if payload.is_empty() {
-                        continue;
-                    }
-
-                    let header = payload[0];
-                    let header = BrokerMessageHeaders::from(header);
+                ClientNetworkEvent::DataReceived {
+                    client_id,
+                    stream: _,
+                    mut payload,
+                } => {
                     // ==========================================
                     // 1. UN NOUVEAU SERVEUR DGS SE DÉCLARE
                     // ==========================================
-                    match header {
-                        BrokerMessageHeaders::FriendHello => {
-                            // Tag(1) + Type(1) + UUID(16)
-                            let server_type = payload[1];
+                    match payload.header {
+                        GameMessageHeaders::FriendHello => {
+                            let friend = payload.extract::<ServerHelloMSG>();
+                            if friend.is_err() {
+                                eprintln!(
+                                    "⚠️ [Spatial] Message FriendHello mal formé : {}",
+                                    friend.err().unwrap()
+                                );
+                                continue;
+                            }
+                            let friend = friend.unwrap();
 
-                            if server_type == ServerType::Server as u8 {
-                                let mut uuid_bytes = [0u8; 16];
-                                uuid_bytes.copy_from_slice(&payload[2..18]);
-                                let dgs_uuid = Uuid::from_bytes_le(uuid_bytes);
+                            let server_type = friend.server_type;
 
-                                println!("🗺️ [Spatial] Nouveau DGS détecté : {}", dgs_uuid);
-                                active_dgs.push(dgs_uuid);
+                            if server_type == ServerType::Server {
+                                let dgs_net_id = friend.id;
+                                println!("🗺️ [Spatial] Nouveau DGS détecté : {}", dgs_net_id);
+                                active_dgs.push(dgs_net_id);
 
                                 let topic = TopicBuilder::new(
                                     SecurityDomain::PrivateRW,
-                                    Namespace::ServerLine,
+                                    Namespace::NodeLine,
                                 )
-                                .append(uuid_bytes.as_ref())
+                                .append_id(dgs_net_id)
                                 .build();
 
                                 if active_dgs.len() == 1 {
-                                    let mut order = BytesMut::new();
-                                    order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
-                                    order.put_i32_le(0); // Chunk X
-                                    order.put_i32_le(0); // Chunk Y
+                                    let msg = TakeChunkMessage {
+                                        game_chunk: GameChunk { x: 0, y: 0 },
+                                    };
 
-                                    broker_api.publish_reliable(topic, order.freeze());
-                                    println!("🗺️ [Spatial] Ordre 'Prends le Chunk 0:0' envoyé au DGS.");
+                                    broker_api.publish_reliable(topic, &msg);
+                                    println!(
+                                        "🗺️ [Spatial] Ordre 'Prends le Chunk 0:0' envoyé au DGS."
+                                    );
                                 }
+                            } else {
+                                let server_name = match server_type {
+                                    ServerType::Client => "client",
+                                    ServerType::Server => "server",
+                                    ServerType::Spatial => "spatial",
+                                    ServerType::Orchestrator => "orchestrator",
+                                    ServerType::Authentification => "authentification",
+                                    ServerType::NotAFriend => "not-friend",
+                                };
+                                println!(
+                                    "⚠️ [Spatial] Un serveur de type '{}' s'est connecté au canal d'authentification, mais ce type n'est pas attendu. Ignoré.",
+                                    server_name
+                                );
+                                continue;
                             }
                         }
                         // ==========================================
                         // 2. UN CLIENT HUMAIN VEUT JOUER (
                         // ==========================================
-                        BrokerMessageHeaders::BrokerBrodcastClientHello => {
-                            // Sécurité : Header(1) + ID(4) = 5 octets minimum pour lire l'ID
-                            if payload.len() < 5 {
-                                eprintln!("⚠️ [Auth] ClientHello trop court");
-                                continue;
-                            }
-
-                            let client_id = u32::from_le_bytes(payload[1..5].try_into().unwrap());
-
-                            if client_id == 0 {
-                                eprintln!(
-                                    "⚠️ [Auth] Reçu un ClientHello avec un ID invalide (0). Ignoré."
+                        GameMessageHeaders::ClientHello => {
+                            let msg = payload.extract::<ClientHelloMsg>();
+                            if msg.is_err() {
+                                println!(
+                                    "⚠️ [Auth] Message ClientHello mal formé : {}",
+                                    msg.err().unwrap()
                                 );
                                 continue;
                             }
-                            let pseudo = if payload.len() > 5 {
-                                std::str::from_utf8(&payload[5..]).unwrap_or("NO_PSEUDO")
-                            } else {
-                                "NO_PSEUDO"
-                            };
+                            let msg = msg.unwrap();
 
                             println!(
-                                "👤 [Auth] Nouveau client {} avec le pseudo '{}' veut jouer !",
-                                client_id, pseudo
+                                "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",
+                                client_id, msg.pseudo
                             );
+
+                            let con_ok = true; // AUTHENTIFICATION ICI !
+
+                            if !con_ok {
+                                println!(
+                                    "🔑 [Auth] Rejet de la connexion du client {} (pseudo: {})",
+                                    client_id, msg.pseudo
+                                );
+                                broker_api.kick_client(client_id);
+                                continue;
+                            }
 
                             broker_api.authorize_client(client_id);
 
-                            let specific_client_topic =
-                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientLine)
-                                    .append_entity(client_id)
-                                    .build();
-                            broker_api.subscribe(specific_client_topic, client_id);
+                            let chunk = GameChunk { x: 0, y: 0 };
 
                             let chunk_0_0_state = TopicBuilder::new(
                                 SecurityDomain::PublicReadPrivateWrite,
                                 Namespace::Chunk,
                             )
-                            .append_grid(0, 0)
+                            .append_chunk(&chunk)
                             .build();
 
                             broker_api.subscribe(chunk_0_0_state, client_id);
@@ -184,27 +205,32 @@ pub async fn run_spatial_auth_server() {
                                 "🔑 [Auth] Le Broker a abonné le joueur {} au Chunk 0:0.",
                                 client_id
                             );
+                            if active_dgs.len() < 1 {
+                                continue;
+                            }
+
                             let server_topic =
-                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerLine)
-                                    .append(active_dgs[0].as_ref())
+                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                                    .append_id(active_dgs[0])
                                     .build();
 
                             // B) Dire au server de faire spawn :
-                            let mut spawn_msg = BytesMut::new();
-                            spawn_msg.put_u8(BrokerMessageHeaders::SpawnClient as u8);
-                            spawn_msg.put_u32_le(client_id); // On lui donne son identifiant officiel
-                            spawn_msg.put_i32_le(0);
-                            spawn_msg.put_i32_le(0);
+                            let msg = SpawnClientMsg {
+                                client_id,
+                                pseudo: msg.pseudo.to_string(),
+                                chunk: chunk.clone(),
+                            };
 
-                            broker_api.publish_reliable(server_topic, spawn_msg.freeze());
+                            broker_api.publish_reliable(server_topic, &msg);
 
-                            let mut welcome_msg = BytesMut::new();
-                            welcome_msg.put_u8(BrokerMessageHeaders::ClientWelcome as u8);
-                            welcome_msg.put_u32_le(client_id);
-                            welcome_msg.put_i32_le(0); // Chunk X
-                            welcome_msg.put_i32_le(0); // Chunk Y
-
-                            broker_api.publish_reliable(specific_client_topic, welcome_msg.freeze());
+                            let msg = ClientWelcomeMsg { client_id, chunk };
+                            let client_topic = TopicBuilder::new(
+                                SecurityDomain::PublicReadPrivateWrite,
+                                Namespace::NodeLine,
+                            )
+                            .append_id(client_id)
+                            .build();
+                            broker_api.publish_reliable(client_topic, &msg);
                         }
 
                         _ => {}

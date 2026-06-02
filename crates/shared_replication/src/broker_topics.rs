@@ -1,7 +1,6 @@
-﻿use std::cmp::min;
+﻿use crate::msg_dgs::GameChunk;
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
-
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -40,8 +39,7 @@ pub enum Namespace {
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 
-    ServerLine = 0x32,      // Direct comm to a server
-    ClientLine = 0x33,      // Direct line to a client
+    NodeLine = 0x32, // Direct comm to a Node
 }
 
 impl TryFrom<u8> for Namespace {
@@ -54,9 +52,9 @@ impl TryFrom<u8> for Namespace {
             0x11 => Ok(Self::SpatialInput),
             0x30 => Ok(Self::Director),
             0x31 => Ok(Self::Heartbeat),
-            0x32 => Ok(Self::ServerLine),
+            0x32 => Ok(Self::NodeLine),
 
-            _=> Err("Namespace inconnu"),
+            _ => Err("Namespace inconnu"),
         }
     }
 }
@@ -64,130 +62,89 @@ impl TryFrom<u8> for Namespace {
 //la même chose mais en correcte :
 pub trait TopicInterface {
     fn security_domain(&self) -> Option<SecurityDomain>;
-    fn default() -> Self;
 
     fn namespace(&self) -> Option<Namespace>;
 }
-pub type Topic = [u8; 32];
+pub type Topic = [u8; TOPIC_LENGTH as usize];
+
+pub trait TopicDefaults {
+    fn default_topic() -> Self;
+    fn topic_length() -> usize;
+}
+impl TopicDefaults for Topic {
+    fn default_topic() -> Self {
+        [0u8; 16] // Plus besoin de Bytes::from_static
+    }
+    fn topic_length() -> usize {
+        TOPIC_LENGTH as usize
+    }
+}
+const TOPIC_LENGTH: u8 = 16;
 impl TopicInterface for Topic {
     fn security_domain(&self) -> Option<SecurityDomain> {
-        SecurityDomain::try_from(self[0]).ok()
-    }
-    fn namespace(&self) -> Option<Namespace> {
-        Namespace::try_from(self[1]).ok()
+        let domain_val = (self[0] >> 6) & 0b00000011;
+        SecurityDomain::try_from(domain_val).ok()
     }
 
-    fn default() -> Self {
-        [0u8; 32]
+    fn namespace(&self) -> Option<Namespace> {
+        let namespace_val = self[0] & 0b00111111;
+        Namespace::try_from(namespace_val).ok()
     }
 }
 
 // --- Le Builder pour créer des topics sans erreur ---
-
+#[derive(Debug, Clone)]
 pub struct TopicBuilder {
     buffer: Topic,
-    current_index: u8,
+    cursor: usize,
 }
 
 impl TopicBuilder {
     pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
-        let mut buffer = [0u8; 32];
-        buffer[0] = domain as u8;
-        buffer[1] = namespace as u8;
-        Self {
-            buffer,
-            current_index: 2,
-        }
+        let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
+        let mut buffer = [0u8; 16];
+        buffer[0] = first_byte;
+        Self { buffer, cursor: 1 } // On a écrit le premier octet
     }
 
-    pub fn append_entity(mut self, entity: u32) -> Self {
-        let entity_bytes = entity.to_le_bytes();
-        let ci = self.current_index as usize;
-        self.buffer[ci..(ci+4)].copy_from_slice(&entity_bytes);
-        self.current_index = (ci + 4) as u8;
+    pub fn append_chunk(mut self, p0: &GameChunk) -> Self {
+        let mut pos = self.cursor;
+        self.buffer[pos..pos + 2].copy_from_slice(&p0.x.to_le_bytes());
+        pos += 2;
+        self.buffer[pos..pos + 2].copy_from_slice(&p0.y.to_le_bytes());
+        self.cursor = pos + 2;
         self
     }
-    /// Ajoute le niveau de détail (utile pour l'AOI)
-    pub fn append_lod(mut self, lod: u16) -> Self {
-        let lod_bytes = lod.to_le_bytes();
-        let ci = self.current_index as usize;
-        self.buffer[ci..(ci+2)].copy_from_slice(&lod_bytes);
-        self.current_index = (ci + 2) as u8;
+    pub fn append_id(mut self, entity: u32) -> Self {
+        // Écriture directe sans allocation dynamique
+        let bytes = entity.to_le_bytes();
+        self.buffer[self.cursor..self.cursor + 4].copy_from_slice(&bytes);
+        self.cursor += 4;
         self
     }
-
-    /// Ajoute des coordonnées spatiales (X, Y) pour la grille d'AOI
-    pub fn append_grid(mut self, cell_x: i32, cell_y: i32) -> Self {
-        let x_bytes = cell_x.to_le_bytes();
-        let y_bytes = cell_y.to_le_bytes();
-        let mut ci = self.current_index as usize;
-        // On place X de l'octet 4 à 7, et Y de 8 à 11
-        self.buffer[ci..(ci+4)].copy_from_slice(&x_bytes);
-        ci += 4;
-        self.buffer[ci..(ci+4)].copy_from_slice(&y_bytes);
-        self.current_index = (ci + 4) as u8;
-        self
-    }
-    pub fn append(mut self, sub_topic: &[u8]) -> Self {
-        let length = sub_topic.len();
-        let remaing_space = 32 - self.buffer.len();
-        let fill_in = min(length, remaing_space);
-        let idx = self.current_index as usize;
-
-        self.buffer[idx..idx + fill_in].copy_from_slice(&sub_topic[..fill_in]);
-        self.current_index += fill_in as u8;
+    pub fn change_namespace(mut self, namespace: Namespace) -> Self {
+        let namespace_val = namespace as u8;
+        self.buffer[0] = (self.buffer[0] & 0b11000000) | (namespace_val & 0b00111111);
         self
     }
 
-    /// Finalise la construction
+    pub fn change_security_domain(mut self, security_domain: SecurityDomain) -> Self {
+        let secu_val = security_domain as u8;
+        self.buffer[0] = (self.buffer[0] & 0b00111111) | ((secu_val << 6) & 0b11000000);
+        self
+    }
+
     pub fn build(self) -> Topic {
         self.buffer
     }
-}
 
-#[repr(u8)]
-#[derive(Debug)]
-//ce que les clients peuvent recevoir.
-pub enum BrokerMessageHeaders {
-    Snapshot = 0x04,    //the shards broadcast the state of the world
-    ClientInput = 0x05, //client to Shard
-
-    BrokerBrodcastClientHello = 0x06,      //Broker broadcast the client Hello.
-    SpawnClient = 0x07,      //broker tells shard to spawn a client
-    ClientWelcome = 0x08,    //broker to client
-    ClientDisconnect = 0x09, //broker to ...
-    ClientLocation = 0x0A,   //just the location of the player, broadcasted by shards.
-    Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
-
-    FriendHello = 0x0F, //When something that isn't a client says hello.
-
-    //inter shard protocol
-   TakeChunk = 0x10,
-
-    DiscardedMessageBecauseYouKnow,
-}
-
-//create BrokerMessageHeaderFrom u8 :
-impl From<u8> for BrokerMessageHeaders {
-    fn from(value: u8) -> Self {
-        match value {
-            0x04 => BrokerMessageHeaders::Snapshot,
-            0x05 => BrokerMessageHeaders::ClientInput,
-
-            0x06 => BrokerMessageHeaders::BrokerBrodcastClientHello,
-            0x07 => BrokerMessageHeaders::SpawnClient,
-            0x08 => BrokerMessageHeaders::ClientWelcome,
-            0x09 => BrokerMessageHeaders::ClientDisconnect,
-
-            0x0A => BrokerMessageHeaders::ClientLocation,
-            0x0B => BrokerMessageHeaders::Heartbeat,
-
-            0x0F => BrokerMessageHeaders::FriendHello,
-
-            0x10 => BrokerMessageHeaders::TakeChunk,
-
-
-            _ => BrokerMessageHeaders::DiscardedMessageBecauseYouKnow,
+    pub fn append(mut self, sub_topic: &[u8]) -> Self {
+        let slice_len = sub_topic.len();
+        if self.cursor + slice_len > self.buffer.len() {
+            panic!("Sub-topic trop long pour le buffer de topic !");
         }
+        self.buffer[self.cursor..self.cursor + slice_len].copy_from_slice(sub_topic);
+        self.cursor += slice_len;
+        self
     }
 }

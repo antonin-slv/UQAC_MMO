@@ -3,16 +3,15 @@
 use crate::events;
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
-use bytes::{BufMut, Bytes, BytesMut};
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
-use shared_replication::Heartbeat;
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_message::ClientId;
-use shared_replication::broker_topics::{
-    BrokerMessageHeaders, Namespace, SecurityDomain, TopicBuilder,
-};
-use shared_replication::client_server::*;
-use shared_replication::servers::ServerType;
+use shared_replication::broker_message::NodeId;
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use shared_replication::msg_game_payload::{GameMessageHeaders, GamePayload};
+
+use shared_replication::msg_client_server::*;
+use shared_replication::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
@@ -27,7 +26,7 @@ pub struct NetworkId(pub u32);
 
 #[derive(Component)]
 pub struct ControlledBy {
-    pub client_id: ClientId,
+    pub client_id: NodeId,
 }
 
 #[derive(Resource, Default)]
@@ -51,12 +50,15 @@ pub struct ServerStats {
     external_port: u16,
     zone: String,
     uuid: uuid::Uuid,
+    server_broker_id: u32,
 }
 
 #[derive(Resource)]
 pub struct BrockerManager {
-    // Remplacement de GamePeer et GameConnection par l'interface unifiée
     pub client: MmoNetworkClient,
+}
+#[derive(Resource)]
+pub struct HeartBeatTimer {
     pub timer: Timer,
 }
 
@@ -152,6 +154,8 @@ impl Plugin for NetworkPlugin {
         app.insert_resource(NetworkIdGenerator::default())
             .insert_resource(BrockerManager {
                 client: broker_client,
+            })
+            .insert_resource(HeartBeatTimer {
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
             })
             .insert_resource(ServerStats {
@@ -161,6 +165,7 @@ impl Plugin for NetworkPlugin {
                 external_url: listen_ip.to_string(),
                 external_port: listen_port,
                 uuid: server_uuid,
+                server_broker_id: 0, // Initialisé à 0, sera mis à jour après le handshake
             });
 
         app.add_message::<PlayerConnected>()
@@ -177,13 +182,14 @@ impl Plugin for NetworkPlugin {
 
 fn send_heartbeat_system(
     time: Res<Time>,
-    mut broker: ResMut<BrockerManager>,
+    broker: ResMut<BrockerManager>,
+    mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
 ) {
-    broker.timer.tick(time.delta());
+    timer.timer.tick(time.delta());
 
-    if broker.timer.just_finished() {
+    if timer.timer.just_finished() {
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
             zone: server_info.zone.clone(),
@@ -191,29 +197,17 @@ fn send_heartbeat_system(
             max_players: server_info.max_players,
         };
 
-        if let Ok(json_bytes) = serde_json::to_vec(&heartbeat) {
-            let data_len = json_bytes.len();
-            let data_len_u8 = (data_len as u16).to_le_bytes() as [u8; 2];
+        let heartbeat = HeartbeatMessage { heartbeat };
 
-            let mut data = BytesMut::with_capacity(1 + 2 + data_len);
-            data.put_u8(BrokerMessageHeaders::Heartbeat as u8);
-            data.put_slice(&data_len_u8);
-            data.put_slice(&json_bytes);
-
-            // On publie le heartbeat sur un topic réservé à l'orchestrateur (Director)
-            let topic_heartbeat =
-                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-
-            broker
-                .client
-                .publish_unreliable(topic_heartbeat, data.freeze());
-        }
+        let topic_heartbeat =
+            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
+        broker.client.publish_reliable(topic_heartbeat, &heartbeat);
     }
 }
 
 fn network_bridge_system(
     mut broker: ResMut<BrockerManager>,
-    server_info: Res<ServerStats>,
+    mut server_info: ResMut<ServerStats>,
     mut msg_connected: MessageWriter<PlayerConnected>,
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
@@ -224,6 +218,11 @@ fn network_bridge_system(
     while let Some(event) = broker_connect.poll() {
         match event {
             ClientNetworkEvent::Ready => {
+                let my_id = broker_connect.node_id.unwrap_or_else(|| {
+                    panic!("Ready event received but node_id is None");
+                });
+                server_info.server_broker_id = my_id;
+
                 println!("[Server] Handshake validé. Connecté au Broker PubSub.");
 
                 // 1. Abonnement à l'attribution de chunks
@@ -231,31 +230,19 @@ fn network_bridge_system(
                 let director_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build();
 
-                // Le paramètre 0 signifie que c'est le serveur lui-même qui s'abonne (pas un joueur)
                 broker_connect.subscribe(director_topic, 0);
-
-                //pour qu'on lui parle directement.
-                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerLine)
-                    .append(server_info.uuid.as_bytes())
-                    .build();
-
-                broker_connect.subscribe(my_topic, 0);
-
                 println!("[Server] Abonnement au topic Director Effectué.");
 
-                // 2. Envoi du paquet Hello / Registration
-                let hello_packet_header = BrokerMessageHeaders::FriendHello as u8;
-                let friend_type = ServerType::Server as u8;
-                let mut data = BytesMut::with_capacity(2 + 16);
-                data.put_u8(hello_packet_header);
-                data.put_u8(friend_type);
-                data.put_slice(server_info.uuid.as_bytes());
+                let msg = ServerHelloMSG {
+                    server_type: ServerType::Server,
+                    id: server_info.server_broker_id,
+                };
 
                 // On envoie le Hello sur le topic d'authentification des serveurs
                 let auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                         .build();
-                broker_connect.publish_reliable(auth_topic, data.freeze());
+                broker_connect.publish_reliable(auth_topic, &msg);
             }
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
@@ -264,11 +251,15 @@ fn network_bridge_system(
                 panic!("Disconnected from broker (this is bad)");
             }
 
-            ClientNetworkEvent::DataReceived { stream: _, payload } => {
+            ClientNetworkEvent::DataReceived {
+                client_id,
+                stream: _,
+                payload,
+            } => {
                 // Le payload pur arrive ici, expurgé du topic par le broker
                 route_message_events(
                     payload,
-                    broker_connect,
+                    client_id,
                     &mut msg_input,
                     &mut msg_connected,
                     &mut msg_disconnected,
@@ -281,87 +272,67 @@ fn network_bridge_system(
 
 /// Gère l'aiguillage des flux de données purs (sans logique de Topic, gérée en amont)
 fn route_message_events(
-    data: Bytes,
-    _broker_connect: &MmoNetworkClient,
+    mut payload: GamePayload,
+    sender_id: NodeId,
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
-    _msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
+    msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
     msg_chunk_assigned: &mut MessageWriter<ChunkAssignedEvent>,
 ) {
-    if data.is_empty() {
-        eprintln!("[Server] Received empty payload from broker, ignoring.");
-        return;
-    }
-    let header_byte = data.first().unwrap();
-    let header = BrokerMessageHeaders::from(*header_byte);
-
-    let mut process_message = || -> Option<()> {
-        match header {
-            BrokerMessageHeaders::ClientInput => {
-                println!("[Server] ClientInput message received");
-                let client_id = ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let input: Input = data.get(5..(5 + 16))?.try_into().ok()?;
-
-                let input = PlayerInput::make_from_u8_slice(input.get(0..2)?)?;
-                println!("\t and forwarded to gameplay systems");
-
+    match payload.header {
+        GameMessageHeaders::ClientInput => match payload.extract::<PlayerInputMsg>() {
+            Ok(msg) => {
                 msg_input.write(PlayerInputEvent {
-                    client_id,
-                    input_data: input,
+                    client_id: sender_id, // Ou le sender_id du broker !
+                    input_data: msg.input_data,
                 });
-
-                Some(())
             }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message ClientInput : {}", e);
+            }
+        },
 
-            BrokerMessageHeaders::SpawnClient => {
-                println!("[Server] SpawnClient message received");
-                let client_id = ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let pseudo_len = data.get(5..6)?.first().cloned()? as usize;
-                let pseudo_end = 6 + pseudo_len;
-                let pseudo = data.get(6..pseudo_end)?;
-
-                let pseudo = std::str::from_utf8(pseudo).ok();
-                let pseudo: String = pseudo.unwrap_or_else(|| "Unknown".into()).to_string();
-
+        GameMessageHeaders::SpawnClient => match payload.extract::<SpawnClientMsg>() {
+            Ok(msg_input) => {
                 msg_connected.write(PlayerConnected {
-                    client_id,
-                    player_name: pseudo,
+                    client_id: msg_input.client_id,
+                    player_name: msg_input.pseudo.clone(),
                 });
-
-                Some(())
             }
-
-            BrokerMessageHeaders::ClientDisconnect => {
-                _msg_disconnected.write(PlayerDisconnected {
-                    client_id: ClientId::from_le_bytes(data.get(1..5)?.try_into().ok()?),
-                });
-                Some(())
-            } /*
-            order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
-            order.put_i32_le(0); // Chunk X
-            order.put_i32_le(0); // Chunk Y */
-            BrokerMessageHeaders::TakeChunk => {
-                println!("[Server] TakeChunk message received");
-                //on doit se subscribe aux inputs de ce chunk :
-                let x = i32::from_le_bytes(data.get(1..5)?.try_into().ok()?);
-                let y = i32::from_le_bytes(data.get(5..9)?.try_into().ok()?);
-
-                msg_chunk_assigned.write(ChunkAssignedEvent {
-                    chunk: events::GameChunk { x, y },
-                });
-                Some(())
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message SpawnClient : {}", e);
             }
-            _ => {
+        },
+
+        GameMessageHeaders::ClientDisconnect => match payload.extract::<ClientDisconnectedMsg>() {
+            Ok(msg_input) => {
+                msg_disconnected.write(PlayerDisconnected {
+                    client_id: msg_input.client_id,
+                });
+            }
+            Err(e) => {
                 println!(
-                    "[Server] Unrecognized message header received: {:?} (raw: {})",
-                    header, header_byte
+                    "[Server] Erreur de parsing du message ClientDisconnect : {}",
+                    e
                 );
-                None
             }
-        }
-    };
+        },
 
-    if process_message().is_none() {
-        eprintln!("[Server] Une erreur ou un message non reconnu a été reçu sur le réseau");
+        GameMessageHeaders::TakeChunk => match payload.extract::<TakeChunkMessage>() {
+            Ok(msg_take_chunk) => {
+                msg_chunk_assigned.write(ChunkAssignedEvent {
+                    chunk: msg_take_chunk.game_chunk,
+                });
+            }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message TakeChunk : {}", e);
+            }
+        },
+        _ => {
+            println!(
+                "[Server] Unrecognized message header received: {:?} (raw: {:?})",
+                payload.header, payload.data
+            );
+        }
     }
 }
