@@ -7,7 +7,7 @@ use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInpu
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use shared_replication::broker_message::NodeId;
 use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use shared_replication::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
+use shared_replication::msg_game_payload::{GameMessageHeaders, GamePayload};
 
 use shared_replication::msg_client_server::*;
 use shared_replication::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
@@ -182,7 +182,7 @@ impl Plugin for NetworkPlugin {
 
 fn send_heartbeat_system(
     time: Res<Time>,
-    mut broker: ResMut<BrockerManager>,
+    broker: ResMut<BrockerManager>,
     mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
@@ -283,7 +283,7 @@ fn network_bridge_system(
 
 /// Gère l'aiguillage des flux de données purs (sans logique de Topic, gérée en amont)
 fn route_message_events(
-    payload: GamePayload,
+    mut payload: GamePayload,
     sender_id: NodeId,
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
@@ -291,74 +291,57 @@ fn route_message_events(
     msg_chunk_assigned: &mut MessageWriter<ChunkAssignedEvent>,
 ) {
     match payload.header {
-        GameMessageHeaders::ClientInput => {
-            let rslt = PlayerInputMsg::deserialize(&payload.data);
-            match rslt {
-                Ok(msg) => {
-                    msg_input.write(PlayerInputEvent {
-                        client_id: sender_id, // Ou le sender_id du broker !
-                        input_data: msg.input_data,
-                    });
-                }
-                Err(e) => {
-                    println!("[Server] Erreur de parsing du message ClientInput : {}", e);
-                }
+        GameMessageHeaders::ClientInput => match payload.extract::<PlayerInputMsg>() {
+            Ok(msg) => {
+                msg_input.write(PlayerInputEvent {
+                    client_id: sender_id, // Ou le sender_id du broker !
+                    input_data: msg.input_data,
+                });
             }
-        }
-
-        GameMessageHeaders::SpawnClient => {
-            let msg = SpawnClientMsg::deserialize(&payload.data); // Juste pour le debug, on refait le parsing dans la logique métier
-
-            match msg {
-                Ok(msg_input) => {
-                    msg_connected.write(PlayerConnected {
-                        client_id: msg_input.client_id,
-                        player_name: msg_input.pseudo.clone(),
-                    });
-                }
-                Err(e) => {
-                    println!("[Server] Erreur de parsing du message SpawnClient : {}", e);
-                }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message ClientInput : {}", e);
             }
-        }
+        },
 
-        GameMessageHeaders::ClientDisconnect => {
-            let msg = ClientDisconnectedMsg::deserialize(&payload.data);
-
-            match msg {
-                Ok(msg_input) => {
-                    msg_disconnected.write(PlayerDisconnected {
-                        client_id: msg_input.client_id,
-                    });
-                }
-                Err(e) => {
-                    println!(
-                        "[Server] Erreur de parsing du message ClientDisconnect : {}",
-                        e
-                    );
-                }
+        GameMessageHeaders::SpawnClient => match payload.extract::<SpawnClientMsg>() {
+            Ok(msg_input) => {
+                msg_connected.write(PlayerConnected {
+                    client_id: msg_input.client_id,
+                    player_name: msg_input.pseudo.clone(),
+                });
             }
-        } /*
-        order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
-        order.put_i32_le(0); // Chunk X
-        order.put_i32_le(0); // Chunk Y */
-        GameMessageHeaders::TakeChunk => {
-            let msg = TakeChunkMessage::deserialize(&payload.data);
-
-            match msg {
-                Ok(msg_input) => {
-                    msg_chunk_assigned.write(ChunkAssignedEvent {
-                        chunk: events::GameChunk {
-                            x: msg_input.chunk_x,
-                            y: msg_input.chunk_y,
-                        },
-                    });
-                }
-                Err(e) => {
-                    println!("[Server] Erreur de parsing du message TakeChunk : {}", e);
-                }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message SpawnClient : {}", e);
             }
-        }
+        },
+
+        GameMessageHeaders::ClientDisconnect => match payload.extract::<ClientDisconnectedMsg>() {
+            Ok(msg_input) => {
+                msg_disconnected.write(PlayerDisconnected {
+                    client_id: msg_input.client_id,
+                });
+            }
+            Err(e) => {
+                println!(
+                    "[Server] Erreur de parsing du message ClientDisconnect : {}",
+                    e
+                );
+            }
+        },
+
+        GameMessageHeaders::TakeChunk => match payload.extract::<TakeChunkMessage>() {
+            Ok(msg_input) => {
+                msg_chunk_assigned.write(ChunkAssignedEvent {
+                    chunk: events::GameChunk {
+                        x: msg_input.chunk_x,
+                        y: msg_input.chunk_y,
+                    },
+                });
+            }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message TakeChunk : {}", e);
+            }
+        },
         _ => {
             println!(
                 "[Server] Unrecognized message header received: {:?} (raw: {:?})",

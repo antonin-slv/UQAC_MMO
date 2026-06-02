@@ -1,4 +1,4 @@
-﻿use std::cmp::min;
+﻿use bytes::{BufMut, Bytes, BytesMut};
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 
@@ -39,7 +39,7 @@ pub enum Namespace {
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 
-    NodeLine = 0x32,        // Direct comm to a Node
+    NodeLine = 0x32, // Direct comm to a Node
 }
 
 impl TryFrom<u8> for Namespace {
@@ -61,17 +61,27 @@ impl TryFrom<u8> for Namespace {
 
 //la même chose mais en correcte :
 pub trait TopicInterface {
-    fn default() -> Self;
-
     fn security_domain(&self) -> Option<SecurityDomain>;
 
     fn namespace(&self) -> Option<Namespace>;
 }
-pub type Topic = [u8; 16];
-impl TopicInterface for Topic {
+pub type Topic = Bytes;
+
+pub trait TopicDefaults {
+    fn default() -> Self;
+    fn topic_length() -> usize;
+}
+
+const TOPIC_LENGTH: u8 = 16;
+impl TopicDefaults for Topic {
     fn default() -> Self {
-        [0u8; 16]
+        Bytes::from_static(&[0u8; TOPIC_LENGTH as usize])
     }
+    fn topic_length() -> usize {
+        TOPIC_LENGTH as usize
+    }
+}
+impl TopicInterface for Topic {
     fn security_domain(&self) -> Option<SecurityDomain> {
         let domain_val = (self[0] >> 6) & 0b00000011;
         SecurityDomain::try_from(domain_val).ok()
@@ -86,63 +96,51 @@ impl TopicInterface for Topic {
 // --- Le Builder pour créer des topics sans erreur ---
 
 pub struct TopicBuilder {
-    buffer: Topic,
-    current_index: u8,
+    buffer: BytesMut,
 }
 
 impl TopicBuilder {
     pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
-        let mut buffer = Topic::default();
-        buffer[0] = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
-        Self {
-            buffer,
-            current_index: 2,
-        }
+        let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
+        let buffer = BytesMut::from(&first_byte.to_le_bytes()[..]);
+        Self { buffer }
     }
 
     pub fn append_id(mut self, entity: u32) -> Self {
-        let entity_bytes = entity.to_le_bytes();
-        let ci = self.current_index as usize;
-        self.buffer[ci..(ci + 4)].copy_from_slice(&entity_bytes);
-        self.current_index = (ci + 4) as u8;
+        self.buffer.put_u32_le(entity);
         self
     }
     /// Ajoute le niveau de détail (utile pour l'AOI)
-    pub fn append_lod(mut self, lod: u16) -> Self {
-        let lod_bytes = lod.to_le_bytes();
-        let ci = self.current_index as usize;
-        self.buffer[ci..(ci + 2)].copy_from_slice(&lod_bytes);
-        self.current_index = (ci + 2) as u8;
+    pub fn append_lod(mut self, lod: u8) -> Self {
+        self.buffer.put_u8(lod);
         self
     }
 
     /// Ajoute des coordonnées spatiales (X, Y) pour la grille d'AOI
     pub fn append_grid(mut self, cell_x: i32, cell_y: i32) -> Self {
-        let x_bytes = cell_x.to_le_bytes();
-        let y_bytes = cell_y.to_le_bytes();
-        let mut ci = self.current_index as usize;
-        // On place X de l'octet 4 à 7, et Y de 8 à 11
-        self.buffer[ci..(ci + 4)].copy_from_slice(&x_bytes);
-        ci += 4;
-        self.buffer[ci..(ci + 4)].copy_from_slice(&y_bytes);
-        self.current_index = (ci + 4) as u8;
+        self.buffer.put_i32_le(cell_x);
+        self.buffer.put_i32_le(cell_y);
         self
     }
     pub fn append(mut self, sub_topic: &[u8]) -> Self {
-        let length = sub_topic.len();
-        let idx = self.current_index as usize;
-
-        let remaing_space = 32 - idx;
-
-        let fill_in = min(length, remaing_space);
-
-        self.buffer[idx..idx + fill_in].copy_from_slice(&sub_topic[..fill_in]);
-        self.current_index += fill_in as u8;
+        self.buffer.put_slice(sub_topic);
         self
     }
 
     /// Finalise la construction
-    pub fn build(self) -> Topic {
-        self.buffer
+    pub fn build(mut self) -> Topic {
+        let current_len = self.buffer.len();
+        let max_len = Topic::topic_length();
+
+        if current_len > max_len {
+            panic!("Topic trop long : {} octets (max {})", current_len, max_len);
+        }
+
+        let remaining = max_len - current_len;
+        if remaining > 0 {
+            self.buffer.put_bytes(0, remaining);
+        }
+
+        self.buffer.freeze()
     }
 }

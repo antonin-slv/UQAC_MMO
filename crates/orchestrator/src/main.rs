@@ -178,7 +178,7 @@ async fn listen_broker(
                 let auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                         .build();
-                broker_api.publish_reliable(auth_topic, &msg);
+                broker_api.publish_reliable(auth_topic.clone(), &msg);
                 println!("[Orchestrator] Handshake 'Hello' envoyé.");
 
                 broker_api.subscribe(auth_topic, 0); //he listens the hello of the servers, I guess.
@@ -197,7 +197,7 @@ async fn listen_broker(
             ClientNetworkEvent::DataReceived {
                 client_id: _,
                 stream: _,
-                payload,
+                mut payload,
             } => {
                 match payload.header {
                     GameMessageHeaders::Heartbeat => {

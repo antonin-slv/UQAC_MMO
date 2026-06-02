@@ -78,11 +78,11 @@ pub async fn run_spatial_auth_server() {
                     println!("🌍 [Spatial/Auth] Connecté au Broker Privé avec succès.");
 
                     // 1. S'abonner pour entendre les "Hello" des nouveaux DGS
-                    broker_api.subscribe(auth_private, 0);
+                    broker_api.subscribe(auth_private.clone(), 0);
 
                     // 2. S'abonner pour entendre les requêtes de Login des vrais joueurs
-                    println!("[Spatial/auth] Subscribing to {:?}", auth_public_listen);
-                    broker_api.subscribe(auth_public_listen, 0);
+                    println!("[Spatial/auth] Subscribing to {:?}", auth_public_listen.clone());
+                    broker_api.subscribe(auth_public_listen.clone(), 0);
                 }
                 ClientNetworkEvent::Connected => {
                     println!("🌍 [Spatial/Auth] Connecté au Broker (Still not ready)...");
@@ -99,7 +99,7 @@ pub async fn run_spatial_auth_server() {
                 ClientNetworkEvent::DataReceived {
                     client_id,
                     stream: _,
-                    payload,
+                    mut payload,
                 } => {
                     // ==========================================
                     // 1. UN NOUVEAU SERVEUR DGS SE DÉCLARE
@@ -193,7 +193,7 @@ pub async fn run_spatial_auth_server() {
                                 TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
                                     .append_id(client_id)
                                     .build();
-                            broker_api.subscribe(specific_client_topic, client_id);
+                            broker_api.subscribe(specific_client_topic.clone(), client_id);
 
                             let chunk_0_0_state = TopicBuilder::new(
                                 SecurityDomain::PublicReadPrivateWrite,

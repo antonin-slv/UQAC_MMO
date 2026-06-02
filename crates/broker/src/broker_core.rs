@@ -50,7 +50,7 @@ pub struct Broker {
     node_id_to_connection: FastMap<NodeId, GameConnection>,
 
     // Pare-feu (Clients uniquement)
-    authenticated_clients: FastSet<NodeId>,
+    not_authenticated_clients: FastSet<NodeId>,
 
     // Abonnements Unifiés
     topic_subscribers: FastMap<Topic, Vec<NodeId>>,
@@ -96,7 +96,7 @@ impl Broker {
             next_server_id: 0x80000000, // Commence avec le Bit Fort à 1
             uuid_to_node_id: FastMap::default(),
             node_id_to_connection: FastMap::default(),
-            authenticated_clients: FastSet::default(),
+            not_authenticated_clients: FastSet::default(),
             topic_subscribers: FastMap::default(),
             node_id_to_topics: FastMap::default(),
         }
@@ -118,7 +118,7 @@ impl Broker {
     fn handle_disconnect(&mut self, conn_uuid: Uuid) {
         if let Some(node_id) = self.uuid_to_node_id.remove(&conn_uuid) {
             self.node_id_to_connection.remove(&node_id);
-            self.authenticated_clients.remove(&node_id);
+            self.not_authenticated_clients.remove(&node_id);
 
             // Nettoyage ultra rapide des abonnements en O(1)
             if let Some(topics) = self.node_id_to_topics.remove(&node_id) {
@@ -152,6 +152,7 @@ impl Broker {
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
                 self.node_id_to_connection.insert(id, conn);
                 self.node_id_to_topics.insert(id, Vec::new());
+                self.not_authenticated_clients.insert(id);
                 println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
             }
 
@@ -217,7 +218,7 @@ impl Broker {
                             eprintln!("[SÉCURITÉ] Accès ÉCRITURE refusé à {}", node_id);
                             return;
                         }
-                        if self.authenticated_clients.contains(&node_id)
+                        if !self.not_authenticated_clients.contains(&node_id)
                             || topic.namespace()
                                 == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
@@ -308,7 +309,7 @@ impl Broker {
                     BrokerMessage::Subscribe { client_id, topic } => {
                         // Astuce : Si le serveur envoie 0, il veut s'abonner LUI-MÊME.
                         let target_id = if client_id == 0 { node_id } else { client_id };
-                        self.node_subscribe(target_id, topic);
+                        self.node_subscribe(target_id, topic.clone());
                         println!(
                             "Abonnement : Nœud {:X} sur {:?}",
                             target_id,
@@ -323,8 +324,9 @@ impl Broker {
                         self.route_message(Broadcast { payload }, topic, stream, false);
                     }
                     BrokerMessage::AuthorizeClient { client_id } => {
-                        self.authenticated_clients.insert(client_id);
-                        println!("[RÉSEAU PRIVÉ] Badge accordé à {}", client_id);
+                        if self.not_authenticated_clients.remove(&client_id) {
+                            println!("[RÉSEAU PRIVÉ] Badge accordé à {}", client_id);
+                        }
                     }
                     BrokerMessage::KickNode { client_id } => {
                         if let Some(conn) = self.node_id_to_connection.get(&client_id) {
@@ -351,7 +353,7 @@ impl Broker {
     fn node_subscribe(&mut self, node_id: NodeId, topic: Topic) {
         let vec = self
             .topic_subscribers
-            .entry(topic)
+            .entry(topic.clone())
             .or_insert_with(|| Vec::with_capacity(16));
         vec_insert_unique(vec, node_id);
 

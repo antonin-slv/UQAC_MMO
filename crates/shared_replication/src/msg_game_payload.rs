@@ -54,7 +54,7 @@ pub trait GameMessage: Sized {
     fn serialize(&self) -> Bytes;
 
     /// Reconstruit la structure à partir des octets (SANS l'en-tête)
-    fn deserialize(data: &Bytes) -> Result<Self, String>;
+    fn deserialize(data: &mut Bytes) -> Result<Self, String>;
 }
 
 /// L'enveloppe renvoyée par le BrokerClient
@@ -72,9 +72,9 @@ impl GamePayload {
         buf.put_slice(&self.data);
         buf.freeze()
     }
-    pub fn extract<T: GameMessage>(&self) -> Result<T, String> {
+    pub fn extract<T: GameMessage>(&mut self) -> Result<T, String> {
         if self.header == T::header() {
-            T::deserialize(&self.data)
+            T::deserialize(&mut self.data)
         } else {
             Err(format!(
                 "Erreur d'extraction : Header attendu {:?}, mais le payload contient {:?}",

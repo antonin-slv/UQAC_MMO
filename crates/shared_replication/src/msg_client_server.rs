@@ -2,7 +2,7 @@
 
 use crate::broker_message::NodeId;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rocket::serde::{Deserialize, Serialize};
 
 //
@@ -29,21 +29,21 @@ impl GameMessage for SnapshotMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::Snapshot
     }
+
     fn serialize(&self) -> Bytes {
-        match bincode::serialize(&self.snapshot) {
-            Ok(snapshot_as_bytes) => Bytes::from(snapshot_as_bytes),
-            Err(e) => {
-                eprintln!("Erreur de sérialisation bincode: {}", e);
-                Bytes::new()
-            }
+        let mut writer = BytesMut::new().writer();
+        if let Err(e) = bincode::serialize_into(&mut writer, &self.snapshot) {
+            eprintln!("Erreur bincode: {}", e);
+            return Bytes::new();
         }
+        writer.into_inner().freeze()
     }
 
-    fn deserialize(bytes: &Bytes) -> Result<Self, String> {
-        if let Ok(snapshot) = bincode::deserialize::<PersonalSnapshot>(&bytes[..]) {
-            Ok(SnapshotMsg { snapshot })
-        } else {
-            Err("Could Not deser snapshot".to_string())
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        let mut reader = data.reader();
+        match bincode::deserialize_from(&mut reader) {
+            Ok(snapshot) => Ok(SnapshotMsg { snapshot }),
+            Err(e) => Err(format!("Impossible de désérialiser le snapshot: {}", e)),
         }
     }
 }
@@ -61,23 +61,22 @@ impl GameMessage for PlayerInputMsg {
     }
 
     fn serialize(&self) -> Bytes {
-        let mut bytes = Vec::with_capacity(6);
-        bytes.extend_from_slice(&self.client_id.to_le_bytes());
-        bytes.extend_from_slice(&self.input_data.to_u8_slice());
-
-        Bytes::from(bytes)
+        let mut buf = BytesMut::with_capacity(6);
+        buf.put_u32_le(self.client_id);
+        buf.put_u16_le(self.input_data.0); // On écrit directement le u16 !
+        buf.freeze()
     }
 
-    fn deserialize(bytes: &Bytes) -> Result<Self, String> {
-        if bytes.len() != 6 {
+    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
+        if bytes.remaining() < 6 {
             return Err(format!(
-                "PlayerInputMsg doit être de 6 octets, trouvé {}",
-                bytes.len()
+                "PlayerInputMsg doit faire 6 octets, reste {}",
+                bytes.remaining()
             ));
         }
-        let client_id = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-        let input_data = PlayerInput::make_from_u8_slice(&bytes[4..6])
-            .ok_or("PlayerInputMsg : données d'entrée mal formées")?;
+        let client_id = bytes.get_u32_le();
+        let input_data = PlayerInput(bytes.get_u16_le());
+
         Ok(Self {
             client_id,
             input_data,
@@ -142,83 +141,91 @@ impl GameMessage for ClientDisconnectedMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientDisconnect
     }
+
     fn serialize(&self) -> Bytes {
-        Bytes::from(self.client_id.to_le_bytes().to_vec())
+        let mut buf = BytesMut::with_capacity(4);
+        buf.put_u32_le(self.client_id);
+        buf.freeze()
     }
-    fn deserialize(bytes: &Bytes) -> Result<Self, String> {
-        if bytes.len() != 4 {
-            return Err(format!(
-                "ClientDisconnectedMsg doit être de 4 octets, trouvé {}",
-                bytes.len()
-            ));
+
+    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
+        if bytes.remaining() < 4 {
+            return Err("ClientDisconnectedMsg trop court".into());
         }
-        let client_id = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-        Ok(Self { client_id })
+        Ok(Self {
+            client_id: bytes.get_u32_le(),
+        })
     }
 }
-
-
 pub struct ClientWelcomeMsg {
     pub client_id: u32,
-    pub chunk_x : i32,
-    pub chunk_y : i32
+    pub chunk_x: i32,
+    pub chunk_y: i32,
 }
 
 impl GameMessage for ClientWelcomeMsg {
-    fn header() -> GameMessageHeaders { GameMessageHeaders::ClientWelcome }
-
-    fn serialize(&self) -> Bytes {
-        let mut bytes = Vec::with_capacity(12);
-        bytes.extend_from_slice(&self.client_id.to_le_bytes());
-        bytes.extend_from_slice(&self.chunk_x.to_le_bytes());
-        bytes.extend_from_slice(&self.chunk_y.to_le_bytes());
-        Bytes::from(bytes)
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::ClientWelcome
     }
 
-    fn deserialize(data: &Bytes) -> Result<Self, String> {
+    fn serialize(&self) -> Bytes {
+        let mut data = BytesMut::with_capacity(12);
+        data.put_u32_le(self.client_id);
+        data.put_i32_le(self.chunk_x);
+        data.put_i32_le(self.chunk_y);
+        data.freeze()
+    }
+
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
         if data.len() != 12 {
             return Err(format!(
                 "ClientWelcomeMsg doit être de 12 octets, trouvé {}",
                 data.len()
             ));
         }
-        let client_id = u32::from_le_bytes(data[0..4].try_into().unwrap());
-        let chunk_x = i32::from_le_bytes(data[4..8].try_into().unwrap());
-        let chunk_y = i32::from_le_bytes(data[8..12].try_into().unwrap());
-        Ok(Self { client_id, chunk_x, chunk_y })
+        let client_id = data.get_u32_le();
+        let chunk_x = data.get_i32_le();
+        let chunk_y = data.get_i32_le();
+        Ok(Self {
+            client_id,
+            chunk_x,
+            chunk_y,
+        })
     }
 }
 
 pub struct ClientHelloMsg {
-    pub pseudo : String,
+    pub pseudo: String,
 }
 
 impl GameMessage for ClientHelloMsg {
-    fn header() -> GameMessageHeaders { GameMessageHeaders::ClientHello }
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::ClientHello
+    }
 
     fn serialize(&self) -> Bytes {
         let pseudo_bytes = self.pseudo.as_bytes();
-        let mut bytes = Vec::with_capacity(2 + pseudo_bytes.len());
-        let pseudo_len_u16 = (pseudo_bytes.len() as u16).to_le_bytes();
-        bytes.extend_from_slice(&pseudo_len_u16);
-        bytes.extend_from_slice(pseudo_bytes);
-        Bytes::from(bytes)
+        let mut buf = BytesMut::with_capacity(2 + pseudo_bytes.len());
+        buf.put_u16_le(pseudo_bytes.len() as u16);
+        buf.put_slice(pseudo_bytes);
+        buf.freeze()
     }
 
-    fn deserialize(data: &Bytes) -> Result<Self, String> {
-        if data.len() < 2 {
-            return Err("ClientHelloMsg trop court pour contenir la longueur du pseudo".into());
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        if data.remaining() < 2 {
+            return Err("ClientHelloMsg trop court".into());
         }
-        let pseudo_len = u16::from_le_bytes(data[0..2].try_into().unwrap()) as usize;
-        if data.len() < 2 + pseudo_len {
-            return Err(format!(
-                "ClientHelloMsg trop court pour contenir le pseudo (attendu {} octets, trouvé {})",
-                pseudo_len,
-                data.len() - 2
-            ));
+
+        let pseudo_len = data.get_u16_le() as usize;
+        if data.remaining() < pseudo_len {
+            return Err("ClientHelloMsg : données de pseudo manquantes".into());
         }
-        let pseudo = String::from_utf8(data[2..2 + pseudo_len].to_vec())
-            .map_err(|e| format!("ClientHelloMsg : pseudo non valide UTF-8: {}", e))?;
+
+        let pseudo_bytes = data.split_to(pseudo_len);
+        let pseudo = std::str::from_utf8(&pseudo_bytes)
+            .map_err(|e| format!("ClientHelloMsg : pseudo non valide UTF-8: {}", e))?
+            .to_string(); // La seule allocation inévitable pour construire la String finale
+
         Ok(Self { pseudo })
     }
 }

@@ -1,6 +1,6 @@
 ﻿use crate::broker_message::NodeId;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
@@ -20,12 +20,12 @@ impl GameMessage for TakeChunkMessage {
         buf.freeze()
     }
 
-    fn deserialize(data: &Bytes) -> Result<Self, String> {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
         if data.len() < 8 {
             return Err("TakeChunk trop court".into());
         }
-        let chunk_x = i32::from_le_bytes(data[0..4].try_into().unwrap());
-        let chunk_y = i32::from_le_bytes(data[4..8].try_into().unwrap());
+        let chunk_x = data.get_i32_le();
+        let chunk_y = data.get_i32_le();
         Ok(Self { chunk_x, chunk_y })
     }
 }
@@ -45,30 +45,40 @@ impl GameMessage for HeartbeatMessage {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::Heartbeat
     }
+
     fn serialize(&self) -> Bytes {
-        if let Ok(json_bytes) = serde_json::to_vec(&self.heartbeat) {
-            let data_len = json_bytes.len();
-            let data_len_u8 = (data_len as u16).to_le_bytes() as [u8; 2];
-            let mut data = BytesMut::with_capacity(2 + data_len);
-            data.put_slice(&data_len_u8);
-            data.put_slice(&json_bytes);
-            data.freeze()
-        } else {
-            Bytes::new() // En cas d'erreur de sérialisation, on retourne un message vide
+        let mut buf = BytesMut::new();
+        buf.put_u16_le(0); // On réserve 2 octets (Placeholder pour la longueur finale)
+
+        // On écrit le JSON directement dans le buffer
+        let mut writer = buf.writer();
+        if serde_json::to_writer(&mut writer, &self.heartbeat).is_err() {
+            return Bytes::new();
         }
+
+        let mut final_buf = writer.into_inner();
+        let payload_len = (final_buf.len() - 2) as u16;
+
+        // On retourne au début pour écraser le placeholder avec la vraie taille !
+        final_buf[0..2].copy_from_slice(&payload_len.to_le_bytes());
+
+        final_buf.freeze()
     }
 
-    fn deserialize(bytes: &Bytes) -> Result<Self, String> {
-        if bytes.len() < 2 {
+    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
+        if bytes.remaining() < 2 {
             return Err("HeartbeatMessage trop court".into());
         }
-        let message_len = u16::from_le_bytes(bytes[0..2].try_into().unwrap()); //safe, car data assez longue
+        let message_len = bytes.get_u16_le() as usize;
 
-        let heartbeat_data = bytes
-            .get(2..(2 + message_len as usize))
-            .ok_or("Données de Heartbeat manquantes")?;
-        let heartbeat: Heartbeat = serde_json::from_slice(heartbeat_data)
+        if bytes.remaining() < message_len {
+            return Err("HeartbeatMessage : JSON incomplet".into());
+        }
+
+        let json_data = bytes.split_to(message_len);
+        let heartbeat: Heartbeat = serde_json::from_slice(&json_data)
             .map_err(|e| format!("Erreur de parsing du Heartbeat : {}", e))?;
+
         Ok(Self { heartbeat })
     }
 }
@@ -86,13 +96,13 @@ impl GameMessage for SpawnClientMsg {
     }
 
     fn serialize(&self) -> Bytes {
+        // Ton code existant ici était déjà parfait avec BytesMut !
         let mut buf = BytesMut::new();
         let pseudo_bytes = self.pseudo.as_bytes();
         if pseudo_bytes.len() > 255 {
             panic!("Pseudo trop long pour SpawnClientMsg");
         }
         buf.put_u32_le(self.client_id);
-
         buf.put_i32_le(self.chunk_x);
         buf.put_i32_le(self.chunk_y);
         buf.put_u8(pseudo_bytes.len() as u8);
@@ -100,25 +110,27 @@ impl GameMessage for SpawnClientMsg {
         buf.freeze()
     }
 
-    fn deserialize(data: &Bytes) -> Result<Self, String> {
-        if data.len() < 13 {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        // 4 (id) + 4 (x) + 4 (y) + 1 (len) = 13 octets minimum
+        if data.remaining() < 13 {
             return Err("SpawnClientMsg trop court".into());
         }
-        let client_id = NodeId::from_le_bytes(data[..4].try_into().unwrap());
-        let chunk_x = i32::from_le_bytes(data[4..8].try_into().unwrap());
-        let chunk_y = i32::from_le_bytes(data[8..12].try_into().unwrap());
-        let pseudo_len = data[12] as usize;
-        if data.len() < 13 + pseudo_len {
-            let msg = format!(
-                "SpawnClientMsg : données de pseudo manquantes : {}/{} byes",
-                data.len() - 13,
-                pseudo_len
-            );
-            return Err(msg);
+
+        let client_id = data.get_u32_le();
+        let chunk_x = data.get_i32_le();
+        let chunk_y = data.get_i32_le();
+        let pseudo_len = data.get_u8() as usize;
+
+        if data.remaining() < pseudo_len {
+            return Err("SpawnClientMsg : pseudo incomplet".into());
         }
-        let pseudo = std::str::from_utf8(&data[12..12 + pseudo_len])
-            .map_err(|e| format!("SpawnClientMsg : pseudo non valide UTF-8 : {}", e))?
+
+        // Remplacement de copy_to_bytes par split_to pour le Zero-Copy
+        let pseudo_bytes = data.split_to(pseudo_len);
+        let pseudo = std::str::from_utf8(&pseudo_bytes)
+            .map_err(|e| format!("SpawnClientMsg : pseudo invalide : {}", e))?
             .to_string();
+
         Ok(Self {
             client_id,
             pseudo,

@@ -87,7 +87,7 @@ fn network_bridge_system(
             ClientNetworkEvent::DataReceived {
                 client_id: _,
                 stream: _,
-                payload,
+                mut payload,
             } => match payload.header {
                 GameMessageHeaders::ClientWelcome => {
                     let msg = payload.extract::<ClientWelcomeMsg>();

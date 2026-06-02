@@ -1,7 +1,7 @@
-﻿use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
-use bytes::Bytes;
+﻿use crate::broker_message::NodeId;
+use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::PartialEq;
-use crate::broker_message::NodeId;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -27,14 +27,7 @@ impl From<u8> for ServerType {
     }
 }
 
-/*
-let hello_packet_header = GameMessageHeaders::FriendHello as u8;
-let friend_type = ServerType::Server as u8;
-let mut data = BytesMut::with_capacity(2 + 16);
-data.put_u8(hello_packet_header);
-data.put_u8(friend_type);
-data.put_slice(server_info.uuid.as_bytes());
-*/
+
 pub struct ServerHelloMSG {
     pub server_type: ServerType,
     pub id: NodeId,
@@ -46,25 +39,24 @@ impl GameMessage for ServerHelloMSG {
     }
 
     fn serialize(&self) -> Bytes {
-        let mut data = Vec::with_capacity(2 + 16);
-        data.push(self.server_type as u8);
-        data.extend_from_slice(&self.id.to_le_bytes());
-        Bytes::from(data)
+        let mut buf = BytesMut::with_capacity(1 + 4);
+        buf.put_u8(self.server_type as u8);
+        buf.put_u32_le(self.id);
+        buf.freeze()
     }
 
-    fn deserialize(data: &Bytes) -> Result<Self, String> {
-        if data.len() < 2 {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        // Il faut s'assurer qu'il reste au moins 5 octets (1 pour le type, 4 pour l'ID)
+        if data.remaining() < 5 {
             return Err("ServerHelloMSG trop court".into());
         }
-        let server_type = ServerType::from(data[0]);
+
+        let server_type = ServerType::from(data.get_u8());
         if server_type == ServerType::NotAFriend {
             return Err("ServerHelloMSG : type de serveur inconnu".into());
         }
-        if data.len() < 1 + 4 {
-            Err("ServerHelloMSG : données d'identification trop courtes".into())
-        } else {
-            let id = u32::from_le_bytes(data[1..5].try_into().unwrap());
-            Ok(Self { server_type, id })
-        }
+
+        let id = data.get_u32_le();
+        Ok(Self { server_type, id })
     }
 }
