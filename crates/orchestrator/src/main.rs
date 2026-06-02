@@ -169,11 +169,6 @@ async fn listen_broker(
                     id: my_id,
                 };
 
-                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
-                    .append_id(my_id)
-                    .build();
-                broker_api.subscribe(my_topic, 0);
-
                 // L'Orchestrateur annonce son existence sur le canal d'authentification
                 let auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)

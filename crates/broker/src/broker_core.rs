@@ -7,14 +7,17 @@ use uuid::Uuid;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 use shared_replication::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
-use shared_replication::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
+use shared_replication::broker_message::{
+    BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID,
+};
 use shared_replication::broker_topics;
-use shared_replication::broker_topics::{SecurityDomain, Topic, TopicInterface};
+use shared_replication::broker_topics::{
+    Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
+};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
 pub type FastIterableSet<K> = IndexSet<K>;
-
 
 const CLIENT_LISTEN_PORT_ENV_NAME: &str = "BROKER_PUBLIC_PORT";
 const SERVER_LISTEN_PORT_ENV_NAME: &str = "BROKER_PRIVATE_PORT";
@@ -128,8 +131,12 @@ impl Broker {
                 self.next_client_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
                 self.node_id_to_connection.insert(id, conn);
-                self.node_id_to_topics.insert(id, FastIterableSet::default());
                 self.not_authenticated_clients.insert(id);
+                let direct_line_topic =
+                    TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::NodeLine)
+                        .append_id(id)
+                        .build();
+                self.node_subscribe(id, direct_line_topic);
                 println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
             }
 
@@ -235,7 +242,16 @@ impl Broker {
                 self.next_server_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
                 self.node_id_to_connection.insert(id, conn);
-                self.node_id_to_topics.insert(id, FastIterableSet::default());
+
+                let topic_builder =
+                    TopicBuilder::new(SecurityDomain::PrivateReadPublicWrite, Namespace::NodeLine)
+                        .append_id(id);
+                let public_topic = topic_builder.clone().build();
+                self.node_subscribe(id, public_topic);
+                let private_topic = topic_builder
+                    .change_security_domain(SecurityDomain::PrivateRW)
+                    .build();
+                self.node_subscribe(id, private_topic);
                 println!(
                     "[RÉSEAU PRIVÉ] Nouveau Serveur Backend connecté : ID {:X}",
                     id
@@ -354,7 +370,6 @@ impl Broker {
         }
     }
 
-    /// La nouvelle fonction de routage magique. Elle lit le bit de poids fort
     /// pour savoir instantanément vers quel peer (Public ou Privé) envoyer la trame.
     fn route_message(
         &self,
@@ -372,7 +387,6 @@ impl Broker {
                         println!("\t to {:X}", node_id);
                     }
 
-                    // L'Aiguillage à la vitesse de la lumière !
                     if node_id.is_server() {
                         let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
                     } else {

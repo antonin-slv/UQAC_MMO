@@ -191,11 +191,6 @@ pub async fn run_spatial_auth_server() {
 
                             broker_api.authorize_client(client_id);
 
-                            let specific_client_topic =
-                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
-                                    .append_id(client_id)
-                                    .build();
-                            broker_api.subscribe(specific_client_topic.clone(), client_id);
                             let chunk = GameChunk { x: 0, y: 0 };
 
                             let chunk_0_0_state = TopicBuilder::new(
@@ -229,7 +224,13 @@ pub async fn run_spatial_auth_server() {
                             broker_api.publish_reliable(server_topic, &msg);
 
                             let msg = ClientWelcomeMsg { client_id, chunk };
-                            broker_api.publish_reliable(specific_client_topic, &msg);
+                            let client_topic = TopicBuilder::new(
+                                SecurityDomain::PublicReadPrivateWrite,
+                                Namespace::NodeLine,
+                            )
+                            .append_id(client_id)
+                            .build();
+                            broker_api.publish_reliable(client_topic, &msg);
                         }
 
                         _ => {}

@@ -83,6 +83,7 @@ impl TopicDefaults for Topic {
     }
 }
 impl TopicInterface for Topic {
+
     fn security_domain(&self) -> Option<SecurityDomain> {
         let domain_val = (self[0] >> 6) & 0b00000011;
         SecurityDomain::try_from(domain_val).ok()
@@ -95,12 +96,24 @@ impl TopicInterface for Topic {
 }
 
 // --- Le Builder pour créer des topics sans erreur ---
-
+#[derive(Debug, Clone)]
 pub struct TopicBuilder {
     buffer: BytesMut,
 }
 
 impl TopicBuilder {
+    pub fn change_namespace(mut self, namespace: Namespace) -> Self {
+        let namespace_val = namespace as u8;
+        self.buffer[0] = (self.buffer[0] & 0b11000000) | (namespace_val & 0b00111111);
+        self
+    }
+
+    pub fn change_security_domain(mut self, security_domain: SecurityDomain) -> Self {
+        let secu_val = security_domain as u8;
+        self.buffer[0] = (self.buffer[0] & 0b00111111) | ((secu_val << 6) & 0b11000000);
+        self
+    }
+
     pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
         let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
         let buffer = BytesMut::from(&first_byte.to_le_bytes()[..]);

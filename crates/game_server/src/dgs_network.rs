@@ -231,17 +231,6 @@ fn network_bridge_system(
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build();
 
                 broker_connect.subscribe(director_topic, 0);
-
-                //pour qu'on lui parle directement.
-                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
-                    .append_id(server_info.server_broker_id)
-                    .build();
-                println!(
-                    "[Server] Souscription au topic direct du serveur : {:?}",
-                    my_topic
-                );
-                broker_connect.subscribe(my_topic, 0);
-
                 println!("[Server] Abonnement au topic Director Effectué.");
 
                 let msg = ServerHelloMSG {
