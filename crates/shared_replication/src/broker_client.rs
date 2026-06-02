@@ -1,6 +1,7 @@
 ﻿use crate::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
 use crate::broker_topics::Topic;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
+use bytes::Buf;
 use game_sockets::GameSocketError;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
@@ -100,33 +101,40 @@ impl MmoNetworkClient {
                             continue;
                         }
 
-                        Ok(BrokerMessage::Broadcast { payload }) => {
+                        Ok(BrokerMessage::Broadcast { mut payload }) => {
                             if payload.is_empty() {
                                 continue;
                             }
 
-                            let header = GameMessageHeaders::from(payload[0]);
-                            let data = payload.slice(1..); // Tranche ultra rapide
+                            let header = GameMessageHeaders::from(payload.get_u8());
 
                             return Some(ClientNetworkEvent::DataReceived {
                                 client_id: 0, // Vient du système
                                 stream,
-                                payload: GamePayload { header, data },
+                                payload: GamePayload {
+                                    header,
+                                    data: payload,
+                                },
                             });
                         }
 
-                        Ok(BrokerMessage::BroadCastFrom { client_id, payload }) => {
+                        Ok(BrokerMessage::BroadCastFrom {
+                            client_id,
+                            mut payload,
+                        }) => {
                             if payload.is_empty() {
                                 continue;
                             }
 
-                            let header = GameMessageHeaders::from(payload[0]);
-                            let data = payload.slice(1..); // Tranche ultra rapide
+                            let header = GameMessageHeaders::from(payload.get_u8());
 
                             return Some(ClientNetworkEvent::DataReceived {
                                 client_id,
                                 stream,
-                                payload: GamePayload { header, data },
+                                payload: GamePayload {
+                                    header,
+                                    data: payload,
+                                },
                             });
                         }
 
@@ -148,7 +156,7 @@ impl MmoNetworkClient {
 
                 Ok(Some(GameNetworkEvent::Error { inner: error, .. })) => {
                     match error {
-                        GameSocketError::ConnectionError { .. } => {
+                        GameSocketError::ConnectionError => {
                             self.connection = None;
                             self.is_ready = false;
                             self.node_id = None;

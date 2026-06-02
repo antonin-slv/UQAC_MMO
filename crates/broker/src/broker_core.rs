@@ -1,4 +1,5 @@
-﻿use nohash_hasher::IntSet;
+﻿use indexmap::IndexSet;
+use nohash_hasher::IntSet;
 use rustc_hash::FxHashMap;
 use std::env;
 use uuid::Uuid;
@@ -12,21 +13,7 @@ use shared_replication::broker_topics::{SecurityDomain, Topic, TopicInterface};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
-
-#[inline]
-fn vec_insert_unique<T: PartialEq>(vec: &mut Vec<T>, item: T) {
-    if !vec.contains(&item) {
-        vec.push(item);
-    }
-}
-
-#[inline]
-fn vec_remove_item<T: PartialEq>(vec: &mut Vec<T>, item: &T) {
-    if let Some(pos) = vec.iter().position(|x| x == item) {
-        vec.swap_remove(pos);
-    }
-}
-
+pub type FastIterableSet<K> = IndexSet<K>;
 // --- MAGIE DU ROUTAGE UNIFIÉ ---
 // Si le bit de poids fort est 1 (0x80000000), c'est un serveur. Sinon, un client.
 #[inline]
@@ -53,8 +40,8 @@ pub struct Broker {
     not_authenticated_clients: FastSet<NodeId>,
 
     // Abonnements Unifiés
-    topic_subscribers: FastMap<Topic, Vec<NodeId>>,
-    node_id_to_topics: FastMap<NodeId, Vec<Topic>>, // Pour un nettoyage O(1)
+    topic_subscribers: FastMap<Topic, FastIterableSet<NodeId>>,
+    node_id_to_topics: FastMap<NodeId, FastIterableSet<Topic>>,
 }
 
 impl Default for Broker {
@@ -118,23 +105,18 @@ impl Broker {
     fn handle_disconnect(&mut self, conn_uuid: Uuid) {
         if let Some(node_id) = self.uuid_to_node_id.remove(&conn_uuid) {
             self.node_id_to_connection.remove(&node_id);
-            self.not_authenticated_clients.remove(&node_id);
 
-            // Nettoyage ultra rapide des abonnements en O(1)
+            // Nettoyage rapide des abonnements
             if let Some(topics) = self.node_id_to_topics.remove(&node_id) {
                 for topic in topics {
-                    if let Some(subs) = self.topic_subscribers.get_mut(&topic) {
-                        vec_remove_item(subs, &node_id);
-                        if subs.is_empty() {
-                            self.topic_subscribers.remove(&topic);
-                        }
-                    }
+                    self.node_unsubscribe(node_id, topic);
                 }
             }
 
             if is_server(node_id) {
                 println!("[RÉSEAU] Serveur déconnecté : ID {:X}", node_id);
             } else {
+                self.not_authenticated_clients.remove(&node_id);
                 println!("[RÉSEAU] Client déconnecté : ID {}", node_id);
             }
         }
@@ -151,7 +133,7 @@ impl Broker {
                 self.next_client_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
                 self.node_id_to_connection.insert(id, conn);
-                self.node_id_to_topics.insert(id, Vec::new());
+                self.node_id_to_topics.insert(id, FastIterableSet::default());
                 self.not_authenticated_clients.insert(id);
                 println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
             }
@@ -258,7 +240,7 @@ impl Broker {
                 self.next_server_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
                 self.node_id_to_connection.insert(id, conn);
-                self.node_id_to_topics.insert(id, Vec::new());
+                self.node_id_to_topics.insert(id, FastIterableSet::default());
                 println!(
                     "[RÉSEAU PRIVÉ] Nouveau Serveur Backend connecté : ID {:X}",
                     id
@@ -354,25 +336,26 @@ impl Broker {
         let vec = self
             .topic_subscribers
             .entry(topic.clone())
-            .or_insert_with(|| Vec::with_capacity(16));
-        vec_insert_unique(vec, node_id);
+            .or_insert_with(|| FastIterableSet::with_capacity(16));
+        vec.insert(node_id);
 
         let topics = self
             .node_id_to_topics
             .entry(node_id)
-            .or_insert_with(|| Vec::with_capacity(16));
-        vec_insert_unique(topics, topic);
+            .or_insert_with(|| FastIterableSet::with_capacity(16));
+        topics.insert(topic);
     }
 
     fn node_unsubscribe(&mut self, node_id: NodeId, topic: Topic) {
         if let Some(subscribers) = self.topic_subscribers.get_mut(&topic) {
-            vec_remove_item(subscribers, &node_id);
-            if subscribers.is_empty() {
-                self.topic_subscribers.remove(&topic);
+            if subscribers.swap_remove(&node_id) {
+                if subscribers.is_empty() {
+                    self.topic_subscribers.remove(&topic);
+                }
             }
         }
         if let Some(topics) = self.node_id_to_topics.get_mut(&node_id) {
-            vec_remove_item(topics, &topic);
+            topics.swap_remove(&topic);
         }
     }
 

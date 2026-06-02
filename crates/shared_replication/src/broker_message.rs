@@ -86,6 +86,7 @@ pub enum BrokerMessage {
 impl BrokerMessage {
     // --- HELPERS DEMANDÉS ---
 
+    #[inline]
     /// Retourne le tag binaire associé au message
     pub fn tag(&self) -> ProtocolTag {
         match self {

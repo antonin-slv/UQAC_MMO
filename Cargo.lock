@@ -1994,9 +1994,8 @@ dependencies = [
 name = "broker"
 version = "0.1.0"
 dependencies = [
- "bytes",
- "dotenv",
  "game_sockets",
+ "indexmap",
  "nohash-hasher",
  "rustc-hash 2.1.2",
  "shared_replication",
