@@ -1,5 +1,5 @@
 ﻿use crate::broker_message::NodeId;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite};
+use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::PartialEq;
 
@@ -35,8 +35,7 @@ pub struct ServerHelloMSG {
 impl NetWrite for ServerHelloMSG {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(1 + 4);
-        buf.put_u8(self.server_type as u8);
-        buf.put_u32_le(self.id);
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }
@@ -55,6 +54,13 @@ impl NetRead for ServerHelloMSG {
 
         let id = data.get_u32_le();
         Ok(Self { server_type, id })
+    }
+}
+
+impl NetWriteTo for ServerHelloMSG {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u8(self.server_type as u8);
+        buf.put_u32_le(self.id);
     }
 }
 

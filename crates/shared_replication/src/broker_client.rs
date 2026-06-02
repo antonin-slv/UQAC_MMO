@@ -1,7 +1,7 @@
 ﻿use crate::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
 use crate::broker_topics::Topic;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
-use bytes::Buf;
+use bytes::{Buf, BytesMut};
 use game_sockets::GameSocketError;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
@@ -192,14 +192,14 @@ impl MmoNetworkClient {
         let msg = BrokerMessage::AuthorizeClient {
             client_id: target_client,
         };
-        self.send_internal(&self.stream_reliable, msg);
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 
     pub fn kick_client(&self, target_client: NodeId) {
         let msg = BrokerMessage::KickNode {
             client_id: target_client,
         };
-        self.send_internal(&self.stream_reliable, msg);
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 
     // --- COMMANDES DE PUBSUB ---
@@ -211,7 +211,7 @@ impl MmoNetworkClient {
             client_id: target_client,
             topic,
         };
-        self.send_internal(&self.stream_reliable, msg);
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 
     /// Annule un abonnement. Utilise toujours le stream Fiable.
@@ -220,34 +220,35 @@ impl MmoNetworkClient {
             client_id: target_client,
             topic,
         };
-        self.send_internal(&self.stream_reliable, msg);
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 
     /// Publie une donnée sur un topic. Le choix du stream dépend du besoin.
     pub fn publish_unreliable<T: GameMessage>(&self, topic: Topic, message: &T) {
-        let payload = GamePayload {
-            header: T::header(),
-            data: message.serialize(),
-        }
-        .to_network_bytes();
-        let msg = BrokerMessage::Publish { topic, payload };
-        self.send_internal(&self.stream_unreliable, msg);
+        // L'unique allocation de tout le processus
+        let mut buf = BytesMut::with_capacity(32);
+        // On délègue la responsabilité de l'ordre d'écriture au BrokerMessage
+        BrokerMessage::write_publish_to(&mut buf, &topic, message);
+
+        self.send_raw(&self.stream_unreliable, buf.freeze());
     }
 
     /// Publie une donnée critique (ex: Achat, Handoff).
     pub fn publish_reliable<T: GameMessage>(&self, topic: Topic, message: &T) {
-        let payload = GamePayload {
-            header: T::header(),
-            data: message.serialize(),
-        }
-        .to_network_bytes();
-        let msg = BrokerMessage::Publish { topic, payload };
-        self.send_internal(&self.stream_reliable, msg);
+        let mut buf = BytesMut::with_capacity(32);
+        BrokerMessage::write_publish_to(&mut buf, &topic, message);
+        self.send_raw(&self.stream_reliable, buf.freeze());
     }
 
     // --- FONCTION UTILITAIRE INTERNE ---
-
-    fn send_internal(&self, stream: &GameStream, msg: BrokerMessage) {
+    fn send_raw(&self, stream: &GameStream, data: bytes::Bytes) {
+        if let Some(conn) = &self.connection {
+            let _ = self.peer.send(conn, stream, data);
+        } else {
+            eprintln!("Tentative d'envoi sans connexion !");
+        }
+    }
+    fn inefficient_send_but_nice_looking(&self, stream: &GameStream, msg: BrokerMessage) {
         if let Some(conn) = &self.connection {
             let serialized = msg.serialize();
             let _ = self.peer.send(conn, stream, serialized);

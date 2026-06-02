@@ -175,14 +175,31 @@ impl BrokerMessage {
                 let client_id = payload.get_u32_le();
                 let topic = payload.split_to(Topic::topic_length());
 
+                let topic_as_topic = {
+                    let mut arr: Topic = [0u8; 16];
+                    arr.copy_from_slice(&topic);
+                    arr
+                };
+
                 if tag == ProtocolTag::Subscribe {
-                    Ok(Self::Subscribe { client_id, topic })
+                    Ok(Self::Subscribe {
+                        client_id,
+                        topic: topic_as_topic,
+                    })
                 } else {
-                    Ok(Self::Unsubscribe { client_id, topic })
+                    Ok(Self::Unsubscribe {
+                        client_id,
+                        topic: topic_as_topic,
+                    })
                 }
             }
             ProtocolTag::Publish => {
                 let topic = payload.split_to(Topic::topic_length());
+                let topic_as_topic = {
+                    let mut arr: Topic = [0u8; 16];
+                    arr.copy_from_slice(&topic);
+                    arr
+                };
                 let payload_len = payload.get_u16_le() as usize;
 
                 // On vérifie que le payload variable est bien présent en entier
@@ -195,7 +212,7 @@ impl BrokerMessage {
                 }
                 let publish_data = payload.split_to(payload_len);
                 Ok(Self::Publish {
-                    topic,
+                    topic: topic_as_topic,
                     payload: publish_data,
                 })
             }
@@ -261,7 +278,11 @@ impl BrokerMessage {
     pub fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put_u8(self.tag() as u8);
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
 
+    pub fn write_to(&self, buf: &mut BytesMut) {
         match self {
             Self::Subscribe { client_id, topic } | Self::Unsubscribe { client_id, topic } => {
                 buf.put_u32_le(*client_id);
@@ -291,6 +312,23 @@ impl BrokerMessage {
                 buf.put_u32_le(*client_id);
             }
         }
-        buf.freeze()
     }
+
+    pub fn write_subscribe_to(buf: &mut BytesMut, target_client: NodeId, topic: &Topic) {
+        buf.put_u8(ProtocolTag::Subscribe as u8);
+        buf.put_u32_le(target_client);
+        buf.put_slice(topic);
+    }
+
+    pub fn write_unsubscribe_from(buf: &mut BytesMut, target_client: NodeId, topic: &Topic) {
+        buf.put_u8(ProtocolTag::Unsubscribe as u8);
+        buf.put_u32_le(target_client);
+        buf.put_slice(topic);
+    }
+
+    pub fn write_publish_headers(buf: &mut BytesMut, topic: &Topic) {
+        buf.put_u8(ProtocolTag::Publish as u8);
+        buf.put_slice(topic);
+    }
+
 }

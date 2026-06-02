@@ -95,7 +95,6 @@ impl Broker {
             while let Ok(Some(event)) = self.private_peer.poll() {
                 self.handle_private_event(event);
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
         }
     }
 
@@ -367,6 +366,9 @@ impl Broker {
         }
         if let Some(topics) = self.node_id_to_topics.get_mut(&node_id) {
             topics.swap_remove(&topic);
+            if topics.is_empty() {
+                self.node_id_to_topics.remove(&node_id);
+            }
         }
     }
 

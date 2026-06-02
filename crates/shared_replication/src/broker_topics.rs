@@ -1,5 +1,4 @@
 ﻿use crate::msg_dgs::GameChunk;
-use bytes::{BufMut, Bytes, BytesMut};
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 
@@ -66,24 +65,22 @@ pub trait TopicInterface {
 
     fn namespace(&self) -> Option<Namespace>;
 }
-pub type Topic = Bytes;
+pub type Topic = [u8; 16];
 
 pub trait TopicDefaults {
     fn default() -> Self;
     fn topic_length() -> usize;
 }
-
-const TOPIC_LENGTH: u8 = 16;
 impl TopicDefaults for Topic {
     fn default() -> Self {
-        Bytes::from_static(&[0u8; TOPIC_LENGTH as usize])
+        [0u8; 16] // Plus besoin de Bytes::from_static
     }
     fn topic_length() -> usize {
         TOPIC_LENGTH as usize
     }
 }
+const TOPIC_LENGTH: u8 = 16;
 impl TopicInterface for Topic {
-
     fn security_domain(&self) -> Option<SecurityDomain> {
         let domain_val = (self[0] >> 6) & 0b00000011;
         SecurityDomain::try_from(domain_val).ok()
@@ -98,10 +95,33 @@ impl TopicInterface for Topic {
 // --- Le Builder pour créer des topics sans erreur ---
 #[derive(Debug, Clone)]
 pub struct TopicBuilder {
-    buffer: BytesMut,
+    buffer: [u8; 16],
+    cursor: usize,
 }
 
 impl TopicBuilder {
+    pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
+        let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
+        let mut buffer = [0u8; 16];
+        buffer[0] = first_byte;
+        Self { buffer, cursor: 1 } // On a écrit le premier octet
+    }
+
+    pub fn append_chunk(mut self, p0: &GameChunk) -> Self {
+        let mut pos = self.cursor;
+        self.buffer[pos..pos + 2].copy_from_slice(&p0.x.to_le_bytes());
+        pos += 2;
+        self.buffer[pos..pos + 2].copy_from_slice(&p0.y.to_le_bytes());
+        self.cursor = pos + 2;
+        self
+    }
+    pub fn append_id(mut self, entity: u32) -> Self {
+        // Écriture directe sans allocation dynamique
+        let bytes = entity.to_le_bytes();
+        self.buffer[self.cursor..self.cursor + 4].copy_from_slice(&bytes);
+        self.cursor += 4;
+        self
+    }
     pub fn change_namespace(mut self, namespace: Namespace) -> Self {
         let namespace_val = namespace as u8;
         self.buffer[0] = (self.buffer[0] & 0b11000000) | (namespace_val & 0b00111111);
@@ -114,47 +134,17 @@ impl TopicBuilder {
         self
     }
 
-    pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
-        let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
-        let buffer = BytesMut::from(&first_byte.to_le_bytes()[..]);
-        Self { buffer }
+    pub fn build(self) -> Topic {
+        self.buffer
     }
 
-    pub fn append_id(mut self, entity: u32) -> Self {
-        self.buffer.put_u32_le(entity);
-        self
-    }
-    /// Ajoute le niveau de détail (utile pour l'AOI)
-    pub fn append_lod(mut self, lod: u8) -> Self {
-        self.buffer.put_u8(lod);
-        self
-    }
-
-    /// Ajoute des coordonnées spatiales (X, Y) pour la grille d'AOI
-    pub fn append_chunk(mut self, chunk: &GameChunk) -> Self {
-        self.buffer.put_i16_le(chunk.x);
-        self.buffer.put_i16_le(chunk.y);
-        self
-    }
     pub fn append(mut self, sub_topic: &[u8]) -> Self {
-        self.buffer.put_slice(sub_topic);
+        let slice_len = sub_topic.len();
+        if self.cursor + slice_len > self.buffer.len() {
+            panic!("Sub-topic trop long pour le buffer de topic !");
+        }
+        self.buffer[self.cursor..self.cursor + slice_len].copy_from_slice(sub_topic);
+        self.cursor += slice_len;
         self
-    }
-
-    /// Finalise la construction
-    pub fn build(mut self) -> Topic {
-        let current_len = self.buffer.len();
-        let max_len = Topic::topic_length();
-
-        if current_len > max_len {
-            panic!("Topic trop long : {} octets (max {})", current_len, max_len);
-        }
-
-        let remaining = max_len - current_len;
-        if remaining > 0 {
-            self.buffer.put_bytes(0, remaining);
-        }
-
-        self.buffer.freeze()
     }
 }

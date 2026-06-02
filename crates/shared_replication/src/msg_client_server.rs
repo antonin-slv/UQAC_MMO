@@ -3,6 +3,7 @@
 use crate::broker_message::NodeId;
 use crate::msg_dgs::GameChunk;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use bincode::Options;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rocket::serde::{Deserialize, Serialize};
 
@@ -28,12 +29,9 @@ pub struct SnapshotMsg {
 
 impl NetWrite for SnapshotMsg {
     fn serialize(&self) -> Bytes {
-        let mut writer = BytesMut::new().writer();
-        if let Err(e) = bincode::serialize_into(&mut writer, &self.snapshot) {
-            eprintln!("Erreur bincode: {}", e);
-            return Bytes::new();
-        }
-        writer.into_inner().freeze()
+        let mut buf = BytesMut::new();
+        self.write_to(&mut buf);
+        buf.freeze()
     }
 }
 
@@ -43,6 +41,17 @@ impl NetRead for SnapshotMsg {
         match bincode::deserialize_from(&mut reader) {
             Ok(snapshot) => Ok(SnapshotMsg { snapshot }),
             Err(e) => Err(format!("Impossible de désérialiser le snapshot: {}", e)),
+        }
+    }
+}
+
+impl NetWriteTo for SnapshotMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        if let Err(e) = bincode::options()
+            .with_fixint_encoding()
+            .serialize_into(buf.writer(), &self.snapshot)
+        {
+            eprintln!("Erreur lors de la sérialisation du snapshot: {}", e);
         }
     }
 }
@@ -66,12 +75,16 @@ impl GameMessage for PlayerInputMsg {
         GameMessageHeaders::ClientInput
     }
 }
-
+impl NetWriteTo for PlayerInputMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u32_le(self.client_id);
+        buf.put_u16_le(self.input_data.0); // On écrit directement le u16 !
+    }
+}
 impl NetWrite for PlayerInputMsg {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(6);
-        buf.put_u32_le(self.client_id);
-        buf.put_u16_le(self.input_data.0); // On écrit directement le u16 !
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }
@@ -147,6 +160,12 @@ pub struct ClientDisconnectedMsg {
     pub client_id: u32,
 }
 
+impl NetWriteTo for ClientDisconnectedMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u32_le(self.client_id);
+    }
+}
+
 impl GameMessage for ClientDisconnectedMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientDisconnect
@@ -155,7 +174,7 @@ impl GameMessage for ClientDisconnectedMsg {
 impl NetWrite for ClientDisconnectedMsg {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(4);
-        buf.put_u32_le(self.client_id);
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }
@@ -177,9 +196,8 @@ pub struct ClientWelcomeMsg {
 
 impl NetWrite for ClientWelcomeMsg {
     fn serialize(&self) -> Bytes {
-        let mut data = BytesMut::with_capacity(12);
-        data.put_u32_le(self.client_id);
-        self.chunk.write_to(&mut data);
+        let mut data = BytesMut::new();
+        self.write_to(&mut data);
         data.freeze()
     }
 }
@@ -201,6 +219,13 @@ impl NetRead for ClientWelcomeMsg {
     }
 }
 
+impl NetWriteTo for ClientWelcomeMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u32_le(self.client_id);
+        self.chunk.write_to(buf);
+    }
+}
+
 impl GameMessage for ClientWelcomeMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientWelcome
@@ -211,6 +236,14 @@ pub struct ClientHelloMsg {
     pub pseudo: String,
 }
 
+impl NetWriteTo for ClientHelloMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        let pseudo_bytes = self.pseudo.as_bytes();
+        buf.put_u16_le(pseudo_bytes.len() as u16);
+        buf.put_slice(pseudo_bytes);
+    }
+}
+
 impl GameMessage for ClientHelloMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::ClientHello
@@ -219,10 +252,8 @@ impl GameMessage for ClientHelloMsg {
 
 impl NetWrite for ClientHelloMsg {
     fn serialize(&self) -> Bytes {
-        let pseudo_bytes = self.pseudo.as_bytes();
-        let mut buf = BytesMut::with_capacity(2 + pseudo_bytes.len());
-        buf.put_u16_le(pseudo_bytes.len() as u16);
-        buf.put_slice(pseudo_bytes);
+        let mut buf = BytesMut::new();
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }

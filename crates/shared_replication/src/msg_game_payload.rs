@@ -1,4 +1,6 @@
 ﻿use bytes::{BufMut, Bytes, BytesMut};
+use crate::broker_message::{BrokerMessage};
+use crate::broker_topics::Topic;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +48,7 @@ impl From<u8> for GameMessageHeaders {
 
 /// Le contrat que chaque message du jeu doit respecter.
 /// Il peut être défini n'importe où dans tes fichiers !
-pub trait GameMessage: Sized + NetWrite + NetRead {
+pub trait GameMessage: Sized + NetWrite + NetRead + NetWriteTo {
     /// Quel est l'octet d'en-tête de ce message ?
     fn header() -> GameMessageHeaders;
 }
@@ -89,5 +91,25 @@ impl GamePayload {
                 self.header
             ))
         }
+    }
+}
+
+impl BrokerMessage {
+    pub fn write_publish_to<T: GameMessage>(
+        buf: &mut BytesMut,
+        topic: &Topic,
+        message: &T
+    ) {
+        BrokerMessage::write_publish_headers(buf, topic);
+
+        buf.put_u16_le(0);
+        let payload_start = buf.len();
+
+        buf.put_u8(T::header() as u8);
+        message.write_to(buf);
+
+        // 5. Calcul de la taille réelle et rétro-injection
+        let payload_len = (buf.len() - payload_start) as u16;
+        buf[payload_start - 2 .. payload_start].copy_from_slice(&payload_len.to_le_bytes());
     }
 }

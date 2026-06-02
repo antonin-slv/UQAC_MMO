@@ -7,6 +7,12 @@ pub struct TakeChunkMessage {
     pub game_chunk: GameChunk,
 }
 
+impl NetWriteTo for TakeChunkMessage {
+    fn write_to(&self, buf: &mut BytesMut) {
+        self.game_chunk.write_to(buf);
+    }
+}
+
 impl GameMessage for TakeChunkMessage {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::TakeChunk
@@ -16,7 +22,7 @@ impl GameMessage for TakeChunkMessage {
 impl NetWrite for TakeChunkMessage {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(4);
-        self.game_chunk.write_to(&mut buf);
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }
@@ -66,6 +72,25 @@ pub struct Heartbeat {
 pub struct HeartbeatMessage {
     pub heartbeat: Heartbeat,
 }
+
+impl NetWriteTo for HeartbeatMessage {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u16_le(0); // On réserve 2 octets (Placeholder pour la longueur finale)
+
+        let original_len = buf.len();
+        // On écrit le JSON directement dans le buffer
+        let mut writer = buf.writer();
+        if serde_json::to_writer(&mut writer, &self.heartbeat).is_err() {
+            panic!("Erreur de sérialisation du Heartbeat en JSON");
+        }
+
+        let payload_len = (buf.len() - original_len) as u16;
+
+        // On retourne au début pour écraser le placeholder avec la vraie taille !
+        buf[0..2].copy_from_slice(&payload_len.to_le_bytes());
+    }
+}
+
 impl GameMessage for HeartbeatMessage {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::Heartbeat
@@ -74,21 +99,8 @@ impl GameMessage for HeartbeatMessage {
 impl NetWrite for HeartbeatMessage {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::new();
-        buf.put_u16_le(0); // On réserve 2 octets (Placeholder pour la longueur finale)
-
-        // On écrit le JSON directement dans le buffer
-        let mut writer = buf.writer();
-        if serde_json::to_writer(&mut writer, &self.heartbeat).is_err() {
-            return Bytes::new();
-        }
-
-        let mut final_buf = writer.into_inner();
-        let payload_len = (final_buf.len() - 2) as u16;
-
-        // On retourne au début pour écraser le placeholder avec la vraie taille !
-        final_buf[0..2].copy_from_slice(&payload_len.to_le_bytes());
-
-        final_buf.freeze()
+        self.write_to(&mut buf);
+        buf.freeze()
     }
 }
 
@@ -117,6 +129,20 @@ pub struct SpawnClientMsg {
     pub chunk: GameChunk,
 }
 
+impl NetWriteTo for SpawnClientMsg {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u32_le(self.client_id);
+        self.chunk.write_to(buf);
+
+        let pseudo_bytes = self.pseudo.as_bytes();
+        if pseudo_bytes.len() > 255 {
+            panic!("Pseudo trop long pour SpawnClientMsg");
+        }
+        buf.put_u8(pseudo_bytes.len() as u8);
+        buf.put_slice(pseudo_bytes);
+    }
+}
+
 impl GameMessage for SpawnClientMsg {
     fn header() -> GameMessageHeaders {
         GameMessageHeaders::SpawnClient
@@ -126,14 +152,7 @@ impl NetWrite for SpawnClientMsg {
     fn serialize(&self) -> Bytes {
         // Ton code existant ici était déjà parfait avec BytesMut !
         let mut buf = BytesMut::new();
-        let pseudo_bytes = self.pseudo.as_bytes();
-        if pseudo_bytes.len() > 255 {
-            panic!("Pseudo trop long pour SpawnClientMsg");
-        }
-        buf.put_u32_le(self.client_id);
-        self.chunk.write_to(&mut buf);
-        buf.put_u8(pseudo_bytes.len() as u8);
-        buf.put_slice(pseudo_bytes);
+        self.write_to(&mut buf);
         buf.freeze()
     }
 }
