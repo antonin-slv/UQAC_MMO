@@ -75,6 +75,7 @@ pub struct HeartbeatMessage {
 
 impl NetWriteTo for HeartbeatMessage {
     fn write_to(&self, buf: &mut BytesMut) {
+        let length_index = buf.len();
         buf.put_u16_le(0); // On réserve 2 octets (Placeholder pour la longueur finale)
 
         let original_len = buf.len();
@@ -87,7 +88,7 @@ impl NetWriteTo for HeartbeatMessage {
         let payload_len = (buf.len() - original_len) as u16;
 
         // On retourne au début pour écraser le placeholder avec la vraie taille !
-        buf[0..2].copy_from_slice(&payload_len.to_le_bytes());
+        buf[length_index..length_index + 2].copy_from_slice(&payload_len.to_le_bytes());
     }
 }
 
