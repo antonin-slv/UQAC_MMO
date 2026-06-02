@@ -4,9 +4,9 @@ use rustc_hash::FxHashMap;
 use std::env;
 use uuid::Uuid;
 
-use bytes::Bytes;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
+use shared_replication::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
 use shared_replication::broker_message::{
     BrokerMessage, NodeId, NodeIdMetaData, ProtocolTag, RELIABLE_STREAM_ID,
 };
@@ -194,19 +194,15 @@ impl Broker {
                             || topic.namespace()
                                 == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
-                            let is_valid = match (BrokerMessage::peek_inner_tag(&payload)) {
-                                (Some(ProtocolTag::BroadcastFromClient)) => true,
-                                _ => false,
-                            };
-
-                            if is_valid {
-                                self.route_raw_bytes(payload.clone(), topic, stream, false);
-                            } else {
-                                eprintln!(
-                                    "[SÉCURITÉ] Usurpation d'identité ou payload malformé par le Client {}",
-                                    node_id
-                                );
-                            }
+                            self.route_message(
+                                BroadCastFrom {
+                                    client_id: node_id,
+                                    payload,
+                                },
+                                topic,
+                                stream,
+                                false,
+                            );
                         } else {
                             eprintln!(
                                 "[SÉCURITÉ] Client {} non authentifié tente de publier !",
@@ -302,7 +298,7 @@ impl Broker {
                     BrokerMessage::Publish { topic, payload } => {
                         // Les serveurs sont dignes de confiance. On forward ce qu'ils ont pré-packagé
                         // (Généralement un ProtocolTag::Broadcast ou BroadcastFromClient)
-                        self.route_raw_bytes(payload.clone(), topic, stream, false);
+                        self.route_message(Broadcast { payload }, topic, stream, false);
                     }
                     BrokerMessage::AuthorizeClient { client_id } => {
                         if self.not_authenticated_clients.remove(&client_id) {
@@ -355,20 +351,26 @@ impl Broker {
 
     /// === LA FONCTION DE ROUTAGE ZERO-COPY ===
     /// Elle prend un buffer pré-formaté et l'injecte directement dans les Sockets.
-    fn route_raw_bytes(&self, data: Bytes, topic: Topic, stream: GameStream, debug_print: bool) {
+    fn route_message(
+        &self,
+        message: BrokerMessage,
+        topic: Topic,
+        stream: GameStream,
+        debug_print: bool,
+    ) {
         if let Some(nodes) = self.topic_subscribers.get(&topic) {
+            let final_bytes = message.serialize();
+
             for &node_id in nodes {
                 if let Some(conn) = self.node_id_to_connection.get(&node_id) {
                     if debug_print {
                         println!("\t to {:X}", node_id);
                     }
 
-                    // data.clone() est gratuit (Atomic Reference Count).
-                    // QUIC backend l'enverra sur le réseau sans jamais la copier.
                     if node_id.is_server() {
-                        let _ = self.private_peer.send(conn, &stream, data.clone());
+                        let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
                     } else {
-                        let _ = self.public_peer.send(conn, &stream, data.clone());
+                        let _ = self.public_peer.send(conn, &stream, final_bytes.clone());
                     }
                 }
             }

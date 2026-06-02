@@ -135,20 +135,6 @@ impl BrokerMessage {
 
     // --- OUTILS DE LECTURE ZERO-COPY ---
 
-    /// Regarde le tag du message encapsulé sans copier ni consommer la mémoire
-    pub fn peek_inner_tag(payload: &Bytes) -> Option<ProtocolTag> {
-        payload.first().and_then(|&b| ProtocolTag::try_from(b).ok())
-    }
-
-    /// Regarde l'ID déclaré dans le message encapsulé sans copier
-    pub fn peek_inner_client_id(payload: &Bytes) -> Option<NodeId> {
-        if payload.len() >= 5 {
-            Some(u32::from_le_bytes(payload[1..5].try_into().unwrap()))
-        } else {
-            None
-        }
-    }
-
     pub fn deserialize(mut payload: Bytes) -> Result<Self, ProtocolError> {
         if payload.is_empty() {
             return Err(ProtocolError::BufferTooShort {
