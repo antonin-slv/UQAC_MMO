@@ -7,19 +7,14 @@ use uuid::Uuid;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 use shared_replication::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
-use shared_replication::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
+use shared_replication::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
 use shared_replication::broker_topics;
 use shared_replication::broker_topics::{SecurityDomain, Topic, TopicInterface};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
 pub type FastIterableSet<K> = IndexSet<K>;
-// --- MAGIE DU ROUTAGE UNIFIÉ ---
-// Si le bit de poids fort est 1 (0x80000000), c'est un serveur. Sinon, un client.
-#[inline]
-pub fn is_server(node_id: NodeId) -> bool {
-    (node_id & 0x80000000) != 0
-}
+
 
 const CLIENT_LISTEN_PORT_ENV_NAME: &str = "BROKER_PUBLIC_PORT";
 const SERVER_LISTEN_PORT_ENV_NAME: &str = "BROKER_PRIVATE_PORT";
@@ -79,8 +74,8 @@ impl Broker {
         Self {
             public_peer,
             private_peer,
-            next_client_id: 1,          // Commence à 1 (0x00000001)
-            next_server_id: 0x80000000, // Commence avec le Bit Fort à 1
+            next_client_id: NodeId::FIRST_CLIENT_ID,
+            next_server_id: NodeId::FIRST_SERVER_ID,
             uuid_to_node_id: FastMap::default(),
             node_id_to_connection: FastMap::default(),
             not_authenticated_clients: FastSet::default(),
@@ -113,7 +108,7 @@ impl Broker {
                 }
             }
 
-            if is_server(node_id) {
+            if node_id.is_server() {
                 println!("[RÉSEAU] Serveur déconnecté : ID {:X}", node_id);
             } else {
                 self.not_authenticated_clients.remove(&node_id);
@@ -313,7 +308,7 @@ impl Broker {
                     BrokerMessage::KickNode { client_id } => {
                         if let Some(conn) = self.node_id_to_connection.get(&client_id) {
                             // On éjecte correctement que ce soit un client (Public) ou un serveur piraté (Privé)
-                            if is_server(client_id) {
+                            if client_id.is_server() {
                                 let _ = self.private_peer.disconnect(conn);
                             } else {
                                 let _ = self.public_peer.disconnect(conn);
@@ -378,7 +373,7 @@ impl Broker {
                     }
 
                     // L'Aiguillage à la vitesse de la lumière !
-                    if is_server(node_id) {
+                    if node_id.is_server() {
                         let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
                     } else {
                         let _ = self.public_peer.send(conn, &stream, final_bytes.clone());

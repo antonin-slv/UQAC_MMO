@@ -68,8 +68,34 @@ impl TryFrom<u8> for ProtocolTag {
     }
 }
 
-//ID d'un client connecté au broker
 pub type NodeId = u32;
+
+pub trait NodeIdMetaData {
+    // Les constantes associées au trait
+    const FIRST_SERVER_ID: Self;
+    const FIRST_CLIENT_ID: Self;
+    const REFERENCE_TO_SENDER: Self;
+
+    // self par valeur (sans le &) car u32 est Copy
+    fn is_client(&self) -> bool;
+    fn is_server(&self) -> bool;
+}
+
+impl NodeIdMetaData for NodeId {
+    const FIRST_SERVER_ID: Self = 0x80000000;
+    const FIRST_CLIENT_ID: Self = 1;
+    // Valeur spéciale pour indiquer que le message vient du client lui-même (utile pour les BroadcastFromClient)
+    const REFERENCE_TO_SENDER: Self = 0;
+    #[inline]
+    fn is_client(&self) -> bool {
+        (self & Self::FIRST_SERVER_ID == 0) && (*self != Self::REFERENCE_TO_SENDER)
+    }
+
+    #[inline]
+    fn is_server(&self) -> bool {
+        (self & Self::FIRST_SERVER_ID) != 0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum BrokerMessage {
