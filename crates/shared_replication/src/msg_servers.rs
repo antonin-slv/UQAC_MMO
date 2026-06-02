@@ -1,6 +1,7 @@
 ﻿use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
 use bytes::Bytes;
 use std::cmp::PartialEq;
+use crate::broker_message::NodeId;
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -36,7 +37,7 @@ data.put_slice(server_info.uuid.as_bytes());
 */
 pub struct ServerHelloMSG {
     pub server_type: ServerType,
-    pub id: u128,
+    pub id: NodeId,
 }
 
 impl GameMessage for ServerHelloMSG {
@@ -59,10 +60,10 @@ impl GameMessage for ServerHelloMSG {
         if server_type == ServerType::NotAFriend {
             return Err("ServerHelloMSG : type de serveur inconnu".into());
         }
-        if data.len() < 1 + 16 {
+        if data.len() < 1 + 4 {
             Err("ServerHelloMSG : données d'identification trop courtes".into())
         } else {
-            let id = u128::from_le_bytes(data[1..17].try_into().unwrap());
+            let id = u32::from_le_bytes(data[1..5].try_into().unwrap());
             Ok(Self { server_type, id })
         }
     }

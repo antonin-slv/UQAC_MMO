@@ -39,8 +39,7 @@ pub enum Namespace {
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 
-    ServerLine = 0x32, // Direct comm to a server
-    ClientLine = 0x33, // Direct line to a client
+    NodeLine = 0x32,        // Direct comm to a Node
 }
 
 impl TryFrom<u8> for Namespace {
@@ -53,7 +52,7 @@ impl TryFrom<u8> for Namespace {
             0x11 => Ok(Self::SpatialInput),
             0x30 => Ok(Self::Director),
             0x31 => Ok(Self::Heartbeat),
-            0x32 => Ok(Self::ServerLine),
+            0x32 => Ok(Self::NodeLine),
 
             _ => Err("Namespace inconnu"),
         }
@@ -62,22 +61,25 @@ impl TryFrom<u8> for Namespace {
 
 //la même chose mais en correcte :
 pub trait TopicInterface {
-    fn security_domain(&self) -> Option<SecurityDomain>;
     fn default() -> Self;
+
+    fn security_domain(&self) -> Option<SecurityDomain>;
 
     fn namespace(&self) -> Option<Namespace>;
 }
-pub type Topic = [u8; 32];
+pub type Topic = [u8; 16];
 impl TopicInterface for Topic {
-    fn security_domain(&self) -> Option<SecurityDomain> {
-        SecurityDomain::try_from(self[0]).ok()
+    fn default() -> Self {
+        [0u8; 16]
     }
-    fn namespace(&self) -> Option<Namespace> {
-        Namespace::try_from(self[1]).ok()
+    fn security_domain(&self) -> Option<SecurityDomain> {
+        let domain_val = (self[0] >> 6) & 0b00000011;
+        SecurityDomain::try_from(domain_val).ok()
     }
 
-    fn default() -> Self {
-        [0u8; 32]
+    fn namespace(&self) -> Option<Namespace> {
+        let namespace_val = self[0] & 0b00111111;
+        Namespace::try_from(namespace_val).ok()
     }
 }
 
@@ -90,16 +92,15 @@ pub struct TopicBuilder {
 
 impl TopicBuilder {
     pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
-        let mut buffer = [0u8; 32];
-        buffer[0] = domain as u8;
-        buffer[1] = namespace as u8;
+        let mut buffer = Topic::default();
+        buffer[0] = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
         Self {
             buffer,
             current_index: 2,
         }
     }
 
-    pub fn append_entity(mut self, entity: u32) -> Self {
+    pub fn append_id(mut self, entity: u32) -> Self {
         let entity_bytes = entity.to_le_bytes();
         let ci = self.current_index as usize;
         self.buffer[ci..(ci + 4)].copy_from_slice(&entity_bytes);

@@ -1,6 +1,6 @@
 ﻿// -- les différents streams de données
 
-use crate::broker_message::ClientId;
+use crate::broker_message::NodeId;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders};
 use bytes::Bytes;
 use rocket::serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ pub type Input = [u8; 16];
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 pub struct EntitySnapshot {
-    pub network_id: u32,
+    pub network_id: NodeId,
     pub position: [f32; 2],
 }
 
@@ -52,7 +52,7 @@ impl GameMessage for SnapshotMsg {
 pub struct PlayerInput(pub u16);
 
 pub struct PlayerInputMsg {
-    pub client_id: ClientId,
+    pub client_id: NodeId,
     pub input_data: PlayerInput,
 }
 impl GameMessage for PlayerInputMsg {

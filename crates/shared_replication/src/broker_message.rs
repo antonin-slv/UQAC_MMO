@@ -2,6 +2,8 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use std::fmt;
 
+pub const RELIABLE_STREAM_ID: u16 = 0;
+
 #[derive(Debug)]
 pub enum ProtocolError {
     BufferTooShort {
@@ -44,6 +46,7 @@ pub enum ProtocolTag {
     BroadcastFromClient = 0x05,
     AuthorizeClient = 0x06,
     KickClient = 0x07,
+    Welcome = 0x08,
 }
 
 impl TryFrom<u8> for ProtocolTag {
@@ -58,6 +61,7 @@ impl TryFrom<u8> for ProtocolTag {
             0x05 => Ok(Self::BroadcastFromClient),
             0x06 => Ok(Self::AuthorizeClient),
             0x07 => Ok(Self::KickClient),
+            0x08 => Ok(Self::Welcome),
 
             _ => Err(ProtocolError::UnknownTag(value)),
         }
@@ -65,17 +69,18 @@ impl TryFrom<u8> for ProtocolTag {
 }
 
 //ID d'un client connecté au broker
-pub type ClientId = u32;
+pub type NodeId = u32;
 
 #[derive(Debug, Clone)]
 pub enum BrokerMessage {
-    Subscribe { client_id: ClientId, topic: Topic },
-    Unsubscribe { client_id: ClientId, topic: Topic },
+    Subscribe { client_id: NodeId, topic: Topic },
+    Unsubscribe { client_id: NodeId, topic: Topic },
     Publish { topic: Topic, payload: Bytes },
     Broadcast { payload: Bytes },
-    BroadCastFromClient { client_id: ClientId, payload: Bytes },
-    AuthorizeClient { client_id: ClientId },
-    KickClient { client_id: ClientId },
+    BroadCastFrom { client_id: NodeId, payload: Bytes },
+    AuthorizeClient { client_id: NodeId },
+    KickNode { client_id: NodeId },
+    Welcome { node_id: NodeId },
 }
 
 impl BrokerMessage {
@@ -88,9 +93,10 @@ impl BrokerMessage {
             Self::Unsubscribe { .. } => ProtocolTag::Unsubscribe,
             Self::Publish { .. } => ProtocolTag::Publish,
             Self::Broadcast { .. } => ProtocolTag::Broadcast,
-            Self::BroadCastFromClient { .. } => ProtocolTag::BroadcastFromClient,
+            Self::BroadCastFrom { .. } => ProtocolTag::BroadcastFromClient,
             Self::AuthorizeClient { .. } => ProtocolTag::AuthorizeClient,
-            Self::KickClient { .. } => ProtocolTag::KickClient,
+            Self::KickNode { .. } => ProtocolTag::KickClient,
+            Self::Welcome { .. } => ProtocolTag::Welcome,
         }
     }
 
@@ -102,6 +108,7 @@ impl BrokerMessage {
             ProtocolTag::Broadcast => 1 + 2,    // Tag(1) + Len(2) + [Payload]
             ProtocolTag::BroadcastFromClient => 1 + 4 + 2, //tag + clientID + [Payload]
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => 1 + 4, // Tag(1) + ID(4)
+            ProtocolTag::Welcome => 1 + 4,
         }
     }
 
@@ -193,7 +200,7 @@ impl BrokerMessage {
                     // 3. Les données (à partir de 6)
                     let playload = Bytes::copy_from_slice(&payload[6..6 + payload_len]);
 
-                    Ok(Self::BroadCastFromClient {
+                    Ok(Self::BroadCastFrom {
                         client_id,
                         payload: playload,
                     })
@@ -211,7 +218,16 @@ impl BrokerMessage {
                 if tag == ProtocolTag::AuthorizeClient {
                     Ok(Self::AuthorizeClient { client_id })
                 } else {
-                    Ok(Self::KickClient { client_id })
+                    Ok(Self::KickNode { client_id })
+                }
+            }
+
+            ProtocolTag::Welcome => {
+                let client_id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                if tag == ProtocolTag::Welcome {
+                    Ok(Self::Welcome { node_id: client_id })
+                } else {
+                    Err(ProtocolError::MalformedData("Welcome message"))
                 }
             }
         }
@@ -236,7 +252,7 @@ impl BrokerMessage {
                 buf.put_u16_le(payload.len() as u16);
                 buf.put_slice(payload);
             }
-            Self::BroadCastFromClient { client_id, payload } => {
+            Self::BroadCastFrom { client_id, payload } => {
                 buf.put_u32_le(*client_id);
                 buf.put_u16_le(payload.len() as u16);
                 buf.put_slice(payload);
@@ -244,7 +260,10 @@ impl BrokerMessage {
             Self::AuthorizeClient { client_id } => {
                 buf.put_u32_le(*client_id);
             }
-            Self::KickClient { client_id } => {
+            Self::KickNode { client_id } => {
+                buf.put_u32_le(*client_id);
+            }
+            Self::Welcome { node_id: client_id } => {
                 buf.put_u32_le(*client_id);
             }
         }

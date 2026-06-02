@@ -1,11 +1,10 @@
-﻿use crate::broker_message::{BrokerMessage, ClientId};
+﻿use crate::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
 use crate::broker_topics::Topic;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
 use game_sockets::GameSocketError;
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 
-const RELIABLE_STREAM_ID: u16 = 1;
 /// Les événements simplifiés remontés au moteur de jeu (Bevy)
 pub enum ClientNetworkEvent {
     Connected,
@@ -13,7 +12,7 @@ pub enum ClientNetworkEvent {
     Disconnected,
     /// Les données brutes reçues
     DataReceived {
-        client_id: ClientId,
+        client_id: NodeId,
         stream: GameStream,
         payload: GamePayload,
     },
@@ -22,6 +21,10 @@ pub enum ClientNetworkEvent {
 pub struct MmoNetworkClient {
     peer: GamePeer,
     connection: Option<GameConnection>,
+
+    // NOUVEAU : Le client stocke son ID officiel distribué par le Broker
+    pub node_id: Option<NodeId>,
+
     // On garde en cache les streams standards pour éviter de les recréer
     stream_unreliable: GameStream,
     stream_reliable: GameStream,
@@ -34,6 +37,8 @@ impl MmoNetworkClient {
         Self {
             peer: GamePeer::new(QuicBackend::new()),
             connection: None,
+            node_id: None, // Initialisé à None
+
             // Définition de nos conventions de streams
             stream_unreliable: GameStream::new(0, GameStreamReliability::Unreliable),
             stream_reliable: GameStream::new(RELIABLE_STREAM_ID, GameStreamReliability::Reliable),
@@ -60,17 +65,41 @@ impl MmoNetworkClient {
             match self.peer.poll() {
                 Ok(Some(GameNetworkEvent::Connected(conn))) => {
                     self.connection = Some(conn);
-                    let _ = self
-                        .peer
-                        .create_stream(conn, GameStreamReliability::Reliable, 1);
+
+                    // CORRECTION : On utilise bien RELIABLE_STREAM_ID et pas le chiffre "1" en dur,
+                    // sinon le Broker n'enverra jamais le message Welcome !
+                    let _ = self.peer.create_stream(
+                        conn,
+                        GameStreamReliability::Reliable,
+                        RELIABLE_STREAM_ID,
+                    );
+
                     return Some(ClientNetworkEvent::Connected);
                 }
+
                 Ok(Some(GameNetworkEvent::Disconnected(_))) => {
                     self.connection = None;
+                    self.is_ready = false;
+                    self.node_id = None; // On efface l'ID
                     return Some(ClientNetworkEvent::Disconnected);
                 }
+
                 Ok(Some(GameNetworkEvent::Message { stream, data, .. })) => {
                     match BrokerMessage::deserialize(data) {
+                        // NOUVEAU : Interception du message Welcome
+                        Ok(BrokerMessage::Welcome { node_id }) => {
+                            if !self.is_ready {
+                                self.node_id = Some(node_id);
+                                self.is_ready = true;
+                                println!(
+                                    "[BrokerClient] Message Welcome reçu. ID officiel : {:X}. Client Ready !",
+                                    node_id
+                                );
+                                return Some(ClientNetworkEvent::Ready);
+                            }
+                            continue;
+                        }
+
                         Ok(BrokerMessage::Broadcast { payload }) => {
                             if payload.is_empty() {
                                 continue;
@@ -80,13 +109,13 @@ impl MmoNetworkClient {
                             let data = payload.slice(1..); // Tranche ultra rapide
 
                             return Some(ClientNetworkEvent::DataReceived {
-                                client_id: 0,
+                                client_id: 0, // Vient du système
                                 stream,
                                 payload: GamePayload { header, data },
                             });
                         }
 
-                        Ok(BrokerMessage::BroadCastFromClient { client_id, payload }) => {
+                        Ok(BrokerMessage::BroadCastFrom { client_id, payload }) => {
                             if payload.is_empty() {
                                 continue;
                             }
@@ -100,33 +129,29 @@ impl MmoNetworkClient {
                                 payload: GamePayload { header, data },
                             });
                         }
+
                         Err(e) => {
                             eprintln!("[BrokerClient] Erreur de parsing du message: {}", e);
-                            continue; // On passe au paquet suivant !
+                            continue;
                         }
                         _ => continue,
                     }
                 }
-                Ok(Some(GameNetworkEvent::StreamCreated(_conn, stream))) => {
-                    if (stream.real_stream_id() == RELIABLE_STREAM_ID)
-                        && stream.is_reliable()
-                        && !self.is_ready
-                        && self.is_connected()
-                    {
-                        self.is_ready = true;
-                        eprintln!("[BrokerClient] Stream fiable prêt, client ready !");
-                        return Some(ClientNetworkEvent::Ready);
-                    }
-                    continue; // On ignore les autres créations de stream
-                }
-                Ok(Some(GameNetworkEvent::StreamClosed(_conn, _stream))) => {
-                    eprintln!("[BrokerClient] stream {:} was closed", _stream.stream_id);
+
+                Ok(Some(GameNetworkEvent::StreamCreated(_conn, _stream))) => {
                     continue;
                 }
+
+                Ok(Some(GameNetworkEvent::StreamClosed(_conn, _stream))) => {
+                    continue;
+                }
+
                 Ok(Some(GameNetworkEvent::Error { inner: error, .. })) => {
                     match error {
                         GameSocketError::ConnectionError { .. } => {
                             self.connection = None;
+                            self.is_ready = false;
+                            self.node_id = None;
                             return Some(ClientNetworkEvent::Disconnected);
                         }
                         _ => {
@@ -136,9 +161,12 @@ impl MmoNetworkClient {
                     continue;
                 }
                 Ok(None) => return None, // Le réseau est vraiment vide, on rend la main
+
                 Err(e) => match e {
                     GameSocketError::ConnectionError { .. } => {
                         self.connection = None;
+                        self.is_ready = false;
+                        self.node_id = None;
                         return Some(ClientNetworkEvent::Disconnected);
                     }
                     _ => {
@@ -150,23 +178,27 @@ impl MmoNetworkClient {
         }
     }
 
-    pub fn authorize_client(&self, target_client: ClientId) {
+    // --- COMMANDES D'ADMINISTRATION ---
+
+    pub fn authorize_client(&self, target_client: NodeId) {
         let msg = BrokerMessage::AuthorizeClient {
             client_id: target_client,
         };
         self.send_internal(&self.stream_reliable, msg);
     }
 
-    pub fn kick_client(&self, target_client: ClientId) {
-        let msg = BrokerMessage::KickClient {
+    pub fn kick_client(&self, target_client: NodeId) {
+        let msg = BrokerMessage::KickNode {
             client_id: target_client,
         };
         self.send_internal(&self.stream_reliable, msg);
     }
 
+    // --- COMMANDES DE PUBSUB ---
+
     /// Demande un abonnement. Utilise toujours le stream Fiable.
     /// `target_client` vaut 0 si le client s'abonne lui-même.
-    pub fn subscribe(&self, topic: Topic, target_client: ClientId) {
+    pub fn subscribe(&self, topic: Topic, target_client: NodeId) {
         let msg = BrokerMessage::Subscribe {
             client_id: target_client,
             topic,
@@ -175,7 +207,7 @@ impl MmoNetworkClient {
     }
 
     /// Annule un abonnement. Utilise toujours le stream Fiable.
-    pub fn unsubscribe(&self, topic: Topic, target_client: ClientId) {
+    pub fn unsubscribe(&self, topic: Topic, target_client: NodeId) {
         let msg = BrokerMessage::Unsubscribe {
             client_id: target_client,
             topic,

@@ -58,6 +58,7 @@ fn network_bridge_system(
         match event {
             // ÉTAPE 1 : Connecté au Broker. On envoie immédiatement le Handshake
             ClientNetworkEvent::Ready => {
+                local_player.net_id = net.client.node_id.unwrap_or(0);
                 println!("[Client] Client prêt. Envoi du Handshake...");
                 let topic_auth_recieve = TopicBuilder::new(
                     SecurityDomain::PublicReadPrivateWrite,
@@ -134,6 +135,7 @@ fn process_snapshots(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut query_net_entities: Query<(Entity, &NetworkEntity, &mut Transform)>,
 ) {
+    let mut entity_to_spawn: Vec<EntitySnapshot> = Vec::new();
     // On récupère tout les snapshot reçu lors de cette frame
     for msg in reader.read() {
         let snapshot = msg.0.clone();
@@ -148,23 +150,26 @@ fn process_snapshots(
                 continue;
             }
 
-            println!(
-                "Nouvelle entité réseau découverte : {}",
-                net_entity.network_id
-            );
+            let index_of_spawnentity = entity_to_spawn
+                .iter()
+                .position(|e| e.network_id == net_entity.network_id);
+            if let Some(index) = index_of_spawnentity {
+                entity_to_spawn.remove(index);
+            }
 
-            commands.spawn((
-                PlayerBundle {
-                    mesh: Mesh2d(meshes.add(Circle::new(10.0))),
-                    material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-                    transform: Transform::from_xyz(
-                        net_entity.position[0],
-                        net_entity.position[1],
-                        0.0,
-                    ),
-                },
-                NetworkEntity(net_entity.network_id),
-            ));
+            entity_to_spawn.push(net_entity);
         }
+    }
+
+    for entity in entity_to_spawn {
+        println!("Nouvelle entité réseau découverte : {}", entity.network_id);
+        commands.spawn((
+            PlayerBundle {
+                mesh: Mesh2d(meshes.add(Circle::new(10.0))),
+                material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+                transform: Transform::from_xyz(entity.position[0], entity.position[1], 0.0),
+            },
+            NetworkEntity(entity.network_id),
+        ));
     }
 }

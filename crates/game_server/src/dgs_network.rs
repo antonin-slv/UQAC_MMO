@@ -5,7 +5,7 @@ use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_message::ClientId;
+use shared_replication::broker_message::NodeId;
 use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use shared_replication::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
 
@@ -26,7 +26,7 @@ pub struct NetworkId(pub u32);
 
 #[derive(Component)]
 pub struct ControlledBy {
-    pub client_id: ClientId,
+    pub client_id: NodeId,
 }
 
 #[derive(Resource, Default)]
@@ -50,12 +50,15 @@ pub struct ServerStats {
     external_port: u16,
     zone: String,
     uuid: uuid::Uuid,
+    server_broker_id: u32,
 }
 
 #[derive(Resource)]
 pub struct BrockerManager {
-    // Remplacement de GamePeer et GameConnection par l'interface unifiée
     pub client: MmoNetworkClient,
+}
+#[derive(Resource)]
+pub struct HeartBeatTimer {
     pub timer: Timer,
 }
 
@@ -151,6 +154,8 @@ impl Plugin for NetworkPlugin {
         app.insert_resource(NetworkIdGenerator::default())
             .insert_resource(BrockerManager {
                 client: broker_client,
+            })
+            .insert_resource(HeartBeatTimer {
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
             })
             .insert_resource(ServerStats {
@@ -160,6 +165,7 @@ impl Plugin for NetworkPlugin {
                 external_url: listen_ip.to_string(),
                 external_port: listen_port,
                 uuid: server_uuid,
+                server_broker_id: 0, // Initialisé à 0, sera mis à jour après le handshake
             });
 
         app.add_message::<PlayerConnected>()
@@ -177,12 +183,13 @@ impl Plugin for NetworkPlugin {
 fn send_heartbeat_system(
     time: Res<Time>,
     mut broker: ResMut<BrockerManager>,
+    mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
 ) {
-    broker.timer.tick(time.delta());
+    timer.timer.tick(time.delta());
 
-    if broker.timer.just_finished() {
+    if timer.timer.just_finished() {
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
             zone: server_info.zone.clone(),
@@ -194,15 +201,13 @@ fn send_heartbeat_system(
 
         let topic_heartbeat =
             TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-        broker
-            .client
-            .publish_unreliable(topic_heartbeat, &heartbeat);
+        broker.client.publish_reliable(topic_heartbeat, &heartbeat);
     }
 }
 
 fn network_bridge_system(
     mut broker: ResMut<BrockerManager>,
-    server_info: Res<ServerStats>,
+    mut server_info: ResMut<ServerStats>,
     mut msg_connected: MessageWriter<PlayerConnected>,
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
@@ -213,6 +218,11 @@ fn network_bridge_system(
     while let Some(event) = broker_connect.poll() {
         match event {
             ClientNetworkEvent::Ready => {
+                let my_id = broker_connect.node_id.unwrap_or_else(|| {
+                    panic!("Ready event received but node_id is None");
+                });
+                server_info.server_broker_id = my_id;
+
                 println!("[Server] Handshake validé. Connecté au Broker PubSub.");
 
                 // 1. Abonnement à l'attribution de chunks
@@ -220,21 +230,23 @@ fn network_bridge_system(
                 let director_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build();
 
-                // Le paramètre 0 signifie que c'est le serveur lui-même qui s'abonne (pas un joueur)
                 broker_connect.subscribe(director_topic, 0);
 
                 //pour qu'on lui parle directement.
-                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerLine)
-                    .append(server_info.uuid.as_bytes())
+                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                    .append_id(server_info.server_broker_id)
                     .build();
-                println!("[Server] Souscription au topic direct du serveur : {:?}", my_topic);
+                println!(
+                    "[Server] Souscription au topic direct du serveur : {:?}",
+                    my_topic
+                );
                 broker_connect.subscribe(my_topic, 0);
 
                 println!("[Server] Abonnement au topic Director Effectué.");
 
                 let msg = ServerHelloMSG {
                     server_type: ServerType::Server,
-                    id: server_info.uuid.as_u128(),
+                    id: server_info.server_broker_id,
                 };
 
                 // On envoie le Hello sur le topic d'authentification des serveurs
@@ -250,11 +262,15 @@ fn network_bridge_system(
                 panic!("Disconnected from broker (this is bad)");
             }
 
-            ClientNetworkEvent::DataReceived { client_id : _, stream: _, payload } => {
+            ClientNetworkEvent::DataReceived {
+                client_id,
+                stream: _,
+                payload,
+            } => {
                 // Le payload pur arrive ici, expurgé du topic par le broker
                 route_message_events(
                     payload,
-                    broker_connect,
+                    client_id,
                     &mut msg_input,
                     &mut msg_connected,
                     &mut msg_disconnected,
@@ -268,7 +284,7 @@ fn network_bridge_system(
 /// Gère l'aiguillage des flux de données purs (sans logique de Topic, gérée en amont)
 fn route_message_events(
     payload: GamePayload,
-    _broker_connect: &MmoNetworkClient,
+    sender_id: NodeId,
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
     msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
@@ -280,7 +296,7 @@ fn route_message_events(
             match rslt {
                 Ok(msg) => {
                     msg_input.write(PlayerInputEvent {
-                        client_id: msg.client_id, // Ou le sender_id du broker !
+                        client_id: sender_id, // Ou le sender_id du broker !
                         input_data: msg.input_data,
                     });
                 }
@@ -296,7 +312,7 @@ fn route_message_events(
             match msg {
                 Ok(msg_input) => {
                     msg_connected.write(PlayerConnected {
-                        client_id: msg_input.client_id, // Ou le sender_id du broker !
+                        client_id: msg_input.client_id,
                         player_name: msg_input.pseudo.clone(),
                     });
                 }
@@ -307,7 +323,6 @@ fn route_message_events(
         }
 
         GameMessageHeaders::ClientDisconnect => {
-
             let msg = ClientDisconnectedMsg::deserialize(&payload.data);
 
             match msg {
@@ -317,11 +332,12 @@ fn route_message_events(
                     });
                 }
                 Err(e) => {
-                    println!("[Server] Erreur de parsing du message ClientDisconnect : {}", e);
+                    println!(
+                        "[Server] Erreur de parsing du message ClientDisconnect : {}",
+                        e
+                    );
                 }
             }
-
-
         } /*
         order.put_u8(BrokerMessageHeaders::TakeChunk as u8);
         order.put_i32_le(0); // Chunk X

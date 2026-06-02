@@ -147,32 +147,41 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
 
 // Nouvelle fonction de routage qui accepte le canal de synchronisation
 async fn listen_broker(
-    client: &mut MmoNetworkClient,
+    broker_api: &mut MmoNetworkClient,
     redis: &RedisManager,
     ready_tx: &mut Option<oneshot::Sender<()>>,
 ) -> Result<()> {
-    while let Some(event) = client.poll() {
+    while let Some(event) = broker_api.poll() {
         match event {
             ClientNetworkEvent::Ready => {
+                let my_id = broker_api.node_id.unwrap_or_else(|| {
+                    panic!("Orchestrator has no node ID after Ready event, using 0 as fallback");
+                });
+
                 // 1. L'Orchestrateur s'abonne au canal "Director" pour recevoir les Heartbeats
                 let heartbeat_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-                client.subscribe(heartbeat_topic, 0);
+                broker_api.subscribe(heartbeat_topic, 0);
                 println!("[Orchestrator] Abonné au topic Heartbeats.");
 
                 let msg = ServerHelloMSG {
                     server_type: ServerType::Orchestrator,
-                    id: Uuid::new_v4().as_u128(),
+                    id: my_id,
                 };
+
+                let my_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                    .append_id(my_id)
+                    .build();
+                broker_api.subscribe(my_topic, 0);
 
                 // L'Orchestrateur annonce son existence sur le canal d'authentification
                 let auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                         .build();
-                client.publish_reliable(auth_topic, &msg);
+                broker_api.publish_reliable(auth_topic, &msg);
                 println!("[Orchestrator] Handshake 'Hello' envoyé.");
 
-                client.subscribe(auth_topic, 0); //he listens the hello of the servers, I guess.
+                broker_api.subscribe(auth_topic, 0); //he listens the hello of the servers, I guess.
 
                 // ---> MAGIE : On débloque la tâche de scaling ! <---
                 if let Some(tx) = ready_tx.take() {
@@ -185,7 +194,11 @@ async fn listen_broker(
             ClientNetworkEvent::Disconnected => {
                 println!("[Orchestrator] Déconnecté du Broker !");
             }
-            ClientNetworkEvent::DataReceived { client_id : _, stream: _, payload } => {
+            ClientNetworkEvent::DataReceived {
+                client_id: _,
+                stream: _,
+                payload,
+            } => {
                 match payload.header {
                     GameMessageHeaders::Heartbeat => {
                         let heartbeat = payload.extract::<HeartbeatMessage>();
@@ -211,15 +224,24 @@ async fn listen_broker(
 
 async fn on_heartbeat_received(redis: &RedisManager, heartbeat: Heartbeat) -> Result<()> {
     let hid = heartbeat.id.clone();
-    let server = redis.get_server(heartbeat.id).await?;
+    let server = redis.get_server(heartbeat.id).await;
 
-    if let Some(mut server) = server {
-        server.players_online = heartbeat.player_count as u32;
-        redis.update_server(&server).await?;
-    } else {
-        eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là");
-        eprintln!("\t bad heartbeat id : {}", hid)
+    match server {
+        Ok(server) => {
+            if let Some(mut server) = server {
+                server.players_online = heartbeat.player_count as u32;
+                redis.update_server(&server).await?;
+            } else {
+                eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là");
+                eprintln!("\t bad heartbeat id : {}", hid)
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[Orchestrator] recieving heartbeat : Error with redis : {}",
+                e
+            );
+        }
     }
-
     Ok(())
 }

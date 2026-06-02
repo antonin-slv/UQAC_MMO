@@ -7,9 +7,8 @@ use shared_replication::msg_game_payload::GameMessageHeaders;
 use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use std::time::Duration;
-use uuid::Uuid;
-
 use bollard::Docker;
+use shared_replication::broker_message::NodeId;
 use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use shared_replication::msg_dgs::{SpawnClientMsg, TakeChunkMessage};
 
@@ -61,7 +60,7 @@ pub async fn run_spatial_auth_server() {
         .connect(broker_ip.as_ref(), broker_private_port)
         .expect("😡 No connexion to broker "); // Se connecte au port Privé (Confiance Totale)
 
-    let mut active_dgs: Vec<Uuid> = Vec::new();
+    let mut active_dgs: Vec<NodeId> = Vec::new();
 
     // Le cerveau écoute les annonces sur le canal d'Authentification (Serveurs et Joueurs)
     let auth_private =
@@ -120,15 +119,15 @@ pub async fn run_spatial_auth_server() {
                             let server_type = friend.server_type;
 
                             if server_type == ServerType::Server {
-                                let dgs_uuid = Uuid::from_u128(friend.id);
-                                println!("🗺️ [Spatial] Nouveau DGS détecté : {}", dgs_uuid);
-                                active_dgs.push(dgs_uuid);
+                                let dgs_net_id = friend.id;
+                                println!("🗺️ [Spatial] Nouveau DGS détecté : {}", dgs_net_id);
+                                active_dgs.push(dgs_net_id);
 
                                 let topic = TopicBuilder::new(
                                     SecurityDomain::PrivateRW,
-                                    Namespace::ServerLine,
+                                    Namespace::NodeLine,
                                 )
-                                .append(dgs_uuid.as_ref())
+                                .append_id(dgs_net_id)
                                 .build();
 
                                 if active_dgs.len() == 1 {
@@ -191,8 +190,8 @@ pub async fn run_spatial_auth_server() {
                             broker_api.authorize_client(client_id);
 
                             let specific_client_topic =
-                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientLine)
-                                    .append_entity(client_id)
+                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                                    .append_id(client_id)
                                     .build();
                             broker_api.subscribe(specific_client_topic, client_id);
 
@@ -213,8 +212,8 @@ pub async fn run_spatial_auth_server() {
                             }
 
                             let server_topic =
-                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerLine)
-                                    .append(active_dgs[0].as_ref())
+                                TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                                    .append_id(active_dgs[0])
                                     .build();
 
                             // B) Dire au server de faire spawn :

@@ -3187,8 +3187,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
- "bincode",
- "bytes",
  "futures-lite",
  "reqwest",
  "shared_replication",
@@ -3200,10 +3198,7 @@ name = "game_server"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bincode",
- "bytes",
  "dotenv",
- "serde_json",
  "shared_replication",
  "uuid",
 ]
@@ -4486,7 +4481,6 @@ name = "mock_spatial_auth_server"
 version = "0.1.0"
 dependencies = [
  "bollard",
- "bytes",
  "dotenv",
  "shared_replication",
  "tokio",
@@ -5216,15 +5210,10 @@ name = "orchestrator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bincode",
  "bollard",
- "bytes",
  "dotenv",
  "futures-util",
- "game_sockets",
  "redis",
- "serde",
- "serde_json",
  "shared_replication",
  "tokio",
  "uuid",

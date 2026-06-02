@@ -5,13 +5,14 @@ use uuid::Uuid;
 
 use game_sockets::protocols::QuicBackend;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
-use shared_replication::broker_message::BrokerMessage::{BroadCastFromClient, Broadcast};
-use shared_replication::broker_message::{BrokerMessage, ClientId};
+use shared_replication::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
+use shared_replication::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
 use shared_replication::broker_topics;
 use shared_replication::broker_topics::{SecurityDomain, Topic, TopicInterface};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
+
 #[inline]
 fn vec_insert_unique<T: PartialEq>(vec: &mut Vec<T>, item: T) {
     if !vec.contains(&item) {
@@ -26,6 +27,13 @@ fn vec_remove_item<T: PartialEq>(vec: &mut Vec<T>, item: &T) {
     }
 }
 
+// --- MAGIE DU ROUTAGE UNIFIÉ ---
+// Si le bit de poids fort est 1 (0x80000000), c'est un serveur. Sinon, un client.
+#[inline]
+pub fn is_server(node_id: NodeId) -> bool {
+    (node_id & 0x80000000) != 0
+}
+
 const CLIENT_LISTEN_PORT_ENV_NAME: &str = "BROKER_PUBLIC_PORT";
 const SERVER_LISTEN_PORT_ENV_NAME: &str = "BROKER_PRIVATE_PORT";
 
@@ -33,20 +41,20 @@ pub struct Broker {
     public_peer: GamePeer,
     private_peer: GamePeer,
 
-    // Gestion des connexions clients (Public)
-    next_client_id: ClientId,
-    uuid_to_client_id: FastMap<Uuid, ClientId>,
-    client_id_to_connection: FastMap<ClientId, GameConnection>,
+    // Générateurs d'ID
+    next_client_id: NodeId,
+    next_server_id: NodeId,
 
-    authenticated_clients: FastSet<ClientId>,
+    // Routage Unifié (Clients & Serveurs mélangés)
+    uuid_to_node_id: FastMap<Uuid, NodeId>,
+    node_id_to_connection: FastMap<NodeId, GameConnection>,
 
-    // L'état du réseau PubSub
-    topic_subscribers: FastMap<Topic, Vec<ClientId>>,
-    client_id_to_topics: FastMap<ClientId, Vec<Topic>>, // Pour un nettoyage O(1) à la déconnexion
+    // Pare-feu (Clients uniquement)
+    authenticated_clients: FastSet<NodeId>,
 
-    // Abonnements des serveurs internes (Shards, Auth, Market)
-    internal_subscribers: FastMap<Topic, Vec<Uuid>>,
-    uuid_to_internal_conn: FastMap<Uuid, GameConnection>,
+    // Abonnements Unifiés
+    topic_subscribers: FastMap<Topic, Vec<NodeId>>,
+    node_id_to_topics: FastMap<NodeId, Vec<Topic>>, // Pour un nettoyage O(1)
 }
 
 impl Default for Broker {
@@ -54,6 +62,7 @@ impl Default for Broker {
         Self::new()
     }
 }
+
 impl Broker {
     pub fn new() -> Self {
         let public_port = env::var(CLIENT_LISTEN_PORT_ENV_NAME)
@@ -83,14 +92,13 @@ impl Broker {
         Self {
             public_peer,
             private_peer,
-            next_client_id: 1,
-            uuid_to_client_id: FastMap::default(),
-            client_id_to_connection: FastMap::default(),
-            topic_subscribers: FastMap::default(),
-            client_id_to_topics: FastMap::default(),
-            internal_subscribers: FastMap::default(),
-            uuid_to_internal_conn: FastMap::default(),
+            next_client_id: 1,          // Commence à 1 (0x00000001)
+            next_server_id: 0x80000000, // Commence avec le Bit Fort à 1
+            uuid_to_node_id: FastMap::default(),
+            node_id_to_connection: FastMap::default(),
             authenticated_clients: FastSet::default(),
+            topic_subscribers: FastMap::default(),
+            node_id_to_topics: FastMap::default(),
         }
     }
 
@@ -106,6 +114,32 @@ impl Broker {
         }
     }
 
+    // Fonction de nettoyage unifiée (Sert pour les Crashs Serveurs ET Joueurs)
+    fn handle_disconnect(&mut self, conn_uuid: Uuid) {
+        if let Some(node_id) = self.uuid_to_node_id.remove(&conn_uuid) {
+            self.node_id_to_connection.remove(&node_id);
+            self.authenticated_clients.remove(&node_id);
+
+            // Nettoyage ultra rapide des abonnements en O(1)
+            if let Some(topics) = self.node_id_to_topics.remove(&node_id) {
+                for topic in topics {
+                    if let Some(subs) = self.topic_subscribers.get_mut(&topic) {
+                        vec_remove_item(subs, &node_id);
+                        if subs.is_empty() {
+                            self.topic_subscribers.remove(&topic);
+                        }
+                    }
+                }
+            }
+
+            if is_server(node_id) {
+                println!("[RÉSEAU] Serveur déconnecté : ID {:X}", node_id);
+            } else {
+                println!("[RÉSEAU] Client déconnecté : ID {}", node_id);
+            }
+        }
+    }
+
     // ==========================================
     // RÉSEAU PUBLIC (Clients / Zéro Confiance)
     // ==========================================
@@ -115,125 +149,99 @@ impl Broker {
             GameNetworkEvent::Connected(conn) => {
                 let id = self.next_client_id;
                 self.next_client_id += 1;
-                self.uuid_to_client_id.insert(conn.connection_uuid, id);
-                self.client_id_to_connection.insert(id, conn);
-                self.client_id_to_topics.insert(id, Vec::new());
+                self.uuid_to_node_id.insert(conn.connection_uuid, id);
+                self.node_id_to_connection.insert(id, conn);
+                self.node_id_to_topics.insert(id, Vec::new());
                 println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
             }
-            GameNetworkEvent::Disconnected(conn) => {
-                if let Some(client_id) = self.uuid_to_client_id.remove(&conn.connection_uuid) {
-                    self.client_id_to_connection.remove(&client_id);
-                    self.authenticated_clients.remove(&client_id);
-                    // Nettoyage des abonnements
-                    if let Some(topics) = self.client_id_to_topics.remove(&client_id) {
-                        for topic in topics {
-                            if let Some(subs) = self.topic_subscribers.get_mut(&topic) {
-                                vec_remove_item(subs, &client_id);
-                            }
-                        }
-                    }
+
+            GameNetworkEvent::StreamCreated(connection, stream) => {
+                let Some(&node_id) = self.uuid_to_node_id.get(&connection.connection_uuid) else {
+                    return;
+                };
+
+                if stream.is_reliable() && stream.real_stream_id() == RELIABLE_STREAM_ID {
+                    let msg = BrokerMessage::Welcome { node_id };
+
+                    self.public_peer.send(
+                        &connection,
+                        &stream,
+                        msg.serialize(),
+                    ).unwrap_or_else(|e| {
+                        eprintln!("[RÉSEAU PUBLIC] Erreur en envoyant le message de bienvenue à {}: {}", node_id, e);
+                    });
                 }
+            }
+            GameNetworkEvent::Disconnected(conn) => {
+                self.handle_disconnect(conn.connection_uuid);
             }
             GameNetworkEvent::Message {
                 connection,
                 stream,
                 data,
             } => {
-                let Some(&client_id) = self.uuid_to_client_id.get(&connection.connection_uuid)
-                else {
+                let Some(&node_id) = self.uuid_to_node_id.get(&connection.connection_uuid) else {
                     return;
                 };
 
-                // 1. Désérialisation
                 let message = match BrokerMessage::deserialize(data) {
                     Ok(msg) => msg,
                     Err(e) => {
                         eprintln!(
                             "[RÉSEAU PUBLIC] Erreur de parsing (Client {}): {}",
-                            client_id, e
+                            node_id, e
                         );
                         return;
                     }
                 };
 
-                // 2. Le Pare-Feu Logique
                 match message {
                     BrokerMessage::Subscribe {
-                        client_id: _msg_client_id,
+                        client_id: _,
                         topic,
                     } => {
-                        let domain = topic.security_domain();
-                        let domain = match domain {
-                            Some(d) => d,
-                            None => {
-                                eprintln!(
-                                    "[SÉCURITÉ] Client {} a tenté de s'abonner à un topic avec un domaine de sécurité invalide : {:?}",
-                                    client_id, topic
-                                );
-                                return;
-                            }
-                        };
-                        if domain == SecurityDomain::PublicReadPrivateWrite {
-                            self.client_subscribe(client_id, topic);
+                        if topic.security_domain() == Some(SecurityDomain::PublicReadPrivateWrite) {
+                            self.node_subscribe(node_id, topic);
                         } else {
-                            eprintln!(
-                                "[SÉCURITÉ] Client {} accès refusé en LECTURE sur le topic {:?}",
-                                client_id, topic
-                            );
+                            eprintln!("[SÉCURITÉ] Accès LECTURE refusé à {}", node_id);
                         }
                     }
                     BrokerMessage::Unsubscribe {
-                        client_id: _msg_client_id,
+                        client_id: _,
                         topic,
                     } => {
-                        self.client_unsubscribe(client_id, topic);
+                        self.node_unsubscribe(node_id, topic);
                     }
                     BrokerMessage::Publish { topic, payload } => {
-                        let domain = topic.security_domain();
-                        let domain = match domain {
-                            Some(d) => d,
-                            None => {
-                                eprintln!(
-                                    "[SÉCURITÉ] Client {} a tenté de s'abonner à un topic avec un domaine de sécurité invalide : {:?}",
-                                    client_id, topic
-                                );
-                                return;
-                            }
-                        };
-                        if domain != SecurityDomain::PrivateReadPublicWrite {
-                            eprintln!(
-                                "[SÉCURITÉ] Client {} accès refusé en ÉCRITURE sur le topic {:?}",
-                                client_id, topic
-                            );
+                        if topic.security_domain() != Some(SecurityDomain::PrivateReadPublicWrite) {
+                            eprintln!("[SÉCURITÉ] Accès ÉCRITURE refusé à {}", node_id);
                             return;
                         }
-                        if self.authenticated_clients.contains(&client_id)
-                            || topic.namespace() == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
+                        if self.authenticated_clients.contains(&node_id)
+                            || topic.namespace()
+                                == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
-                            // Le client a son badge, il peut publier ses inputs
                             self.route_message(
-                                BroadCastFromClient { client_id, payload },
+                                BroadCastFrom {
+                                    client_id: node_id,
+                                    payload,
+                                },
                                 topic,
                                 stream,
                                 false,
                             );
                         } else {
                             eprintln!(
-                                "[SÉCURITÉ] Client {} a tenté de publier sur {:?} sans être authentifié !",
-                                client_id, topic
+                                "[SÉCURITÉ] Client {} non authentifié tente de publier !",
+                                node_id
                             );
                         }
                     }
                     _ => {
-                        eprintln!(
-                            "[RÉSEAU PUBLIC] Client {} a envoyé un message avec un tag non autorisé pour les clients : {:?}",
-                            client_id,
-                            message.tag()
-                        );
+                        eprintln!("[SÉCURITÉ] Tag invalide venant de {}", node_id);
                     }
                 }
             }
-
             _ => {}
         }
     }
@@ -245,20 +253,49 @@ impl Broker {
     fn handle_private_event(&mut self, event: GameNetworkEvent) {
         match event {
             GameNetworkEvent::Connected(conn) => {
-                self.uuid_to_internal_conn
-                    .insert(conn.connection_uuid, conn);
-                println!("[RÉSEAU PRIVÉ] Nouveau serveur Backend connecté.");
+                let id = self.next_server_id;
+                self.next_server_id += 1;
+                self.uuid_to_node_id.insert(conn.connection_uuid, id);
+                self.node_id_to_connection.insert(id, conn);
+                self.node_id_to_topics.insert(id, Vec::new());
+                println!(
+                    "[RÉSEAU PRIVÉ] Nouveau Serveur Backend connecté : ID {:X}",
+                    id
+                );
+
+                // IMPORTANT : Il faudra coder ici un message BrokerMessage::WelcomeNode(id)
+                // pour dire au serveur quel est son identifiant ClientId assigné.
             }
             GameNetworkEvent::Disconnected(conn) => {
-                self.uuid_to_internal_conn.remove(&conn.connection_uuid);
-                println!("[RÉSEAU PRIVÉ] Un serveur Backend s'est déconnecté.");
-                // Le nettoyage complet des topics internes pourrait être ajouté ici
+                self.handle_disconnect(conn.connection_uuid);
             }
+            GameNetworkEvent::StreamCreated(connection, stream) => {
+                let Some(&node_id) = self.uuid_to_node_id.get(&connection.connection_uuid) else {
+                    return;
+                };
+
+                if stream.is_reliable() && stream.real_stream_id() == RELIABLE_STREAM_ID {
+                    let msg = BrokerMessage::Welcome { node_id };
+
+                    self.private_peer.send(
+                        &connection,
+                        &stream,
+                        msg.serialize(),
+                    ).unwrap_or_else(|e| {
+                        eprintln!("[RÉSEAU PUBLIC] Erreur en envoyant le message de bienvenue à {}: {}", node_id, e);
+                    });
+                }
+            }
+
             GameNetworkEvent::Message {
                 connection,
                 stream,
                 data,
             } => {
+                let Some(&node_id) = self.uuid_to_node_id.get(&connection.connection_uuid) else {
+                    return;
+                };
+
                 let message = match BrokerMessage::deserialize(data) {
                     Ok(msg) => msg,
                     Err(e) => {
@@ -269,56 +306,37 @@ impl Broker {
 
                 match message {
                     BrokerMessage::Subscribe { client_id, topic } => {
-                        if client_id == 0 {
-                            // Le serveur s'abonne lui-même pour écouter ce topic
-                            let subs = self.internal_subscribers.entry(topic).or_default();
-                            vec_insert_unique(subs, connection.connection_uuid);
-                            println!(
-                                "Internal subscriber {:?} subscribed to {:?}",
-                                connection.connection_uuid, topic
-                            );
-                        } else {
-                            // Force l'abonnement d'un joueur.
-                            self.client_subscribe(client_id, topic);
-                            println!(
-                                "Subscribed {} to {:?} (via {})",
-                                client_id, topic, connection.connection_uuid
-                            );
-                        }
-                    }
-                    BrokerMessage::Unsubscribe { client_id, topic } => {
-                        if client_id == 0 {
-                            if let Some(subs) = self.internal_subscribers.get_mut(&topic) {
-                                vec_remove_item(subs, &connection.connection_uuid);
-                                if subs.is_empty() {
-                                    self.internal_subscribers.remove(&topic);
-                                }
-                            }
-                        } else {
-                            self.client_unsubscribe(client_id, topic);
-                        }
-                    }
-                    BrokerMessage::Publish { topic, payload } => {
-                        // Le paramètre client_id est mis à 0 pour signifier "Envoyé par le système"
-
-                        self.route_message(Broadcast { payload }, topic, stream, false);
-                    }
-
-                    BrokerMessage::AuthorizeClient { client_id } => {
-                        self.authenticated_clients.insert(client_id);
+                        // Astuce : Si le serveur envoie 0, il veut s'abonner LUI-MÊME.
+                        let target_id = if client_id == 0 { node_id } else { client_id };
+                        self.node_subscribe(target_id, topic);
                         println!(
-                            "[RÉSEAU PRIVÉ] Le Broker a accordé le badge de publication au client {}.",
-                            client_id
+                            "Abonnement : Nœud {:X} sur {:?}",
+                            target_id,
+                            topic.namespace()
                         );
                     }
-
-                    BrokerMessage::KickClient { client_id } => {
-                        if let Some(conn) = self.client_id_to_connection.get(&client_id) {
-                            let _ = self.public_peer.disconnect(conn);
-                            println!("🔑 [Auth] Le client {} est banni. Éjection !", client_id);
+                    BrokerMessage::Unsubscribe { client_id, topic } => {
+                        let target_id = if client_id == 0 { node_id } else { client_id };
+                        self.node_unsubscribe(target_id, topic);
+                    }
+                    BrokerMessage::Publish { topic, payload } => {
+                        self.route_message(Broadcast { payload }, topic, stream, false);
+                    }
+                    BrokerMessage::AuthorizeClient { client_id } => {
+                        self.authenticated_clients.insert(client_id);
+                        println!("[RÉSEAU PRIVÉ] Badge accordé à {}", client_id);
+                    }
+                    BrokerMessage::KickNode { client_id } => {
+                        if let Some(conn) = self.node_id_to_connection.get(&client_id) {
+                            // On éjecte correctement que ce soit un client (Public) ou un serveur piraté (Privé)
+                            if is_server(client_id) {
+                                let _ = self.private_peer.disconnect(conn);
+                            } else {
+                                let _ = self.public_peer.disconnect(conn);
+                            }
+                            println!("🔑 [Auth] Le Nœud {:X} a été éjecté.", client_id);
                         }
                     }
-
                     _ => {}
                 }
             }
@@ -330,35 +348,34 @@ impl Broker {
     // LOGIQUE INTERNE (Routage et Mémoire)
     // ==========================================
 
-    fn client_subscribe(&mut self, client_id: ClientId, topic: Topic) {
+    fn node_subscribe(&mut self, node_id: NodeId, topic: Topic) {
         let vec = self
             .topic_subscribers
             .entry(topic)
             .or_insert_with(|| Vec::with_capacity(16));
-        vec_insert_unique(vec, client_id);
+        vec_insert_unique(vec, node_id);
 
         let topics = self
-            .client_id_to_topics
-            .entry(client_id)
+            .node_id_to_topics
+            .entry(node_id)
             .or_insert_with(|| Vec::with_capacity(16));
         vec_insert_unique(topics, topic);
     }
 
-    fn client_unsubscribe(&mut self, client_id: ClientId, topic: Topic) {
+    fn node_unsubscribe(&mut self, node_id: NodeId, topic: Topic) {
         if let Some(subscribers) = self.topic_subscribers.get_mut(&topic) {
-            vec_remove_item(subscribers, &client_id);
+            vec_remove_item(subscribers, &node_id);
             if subscribers.is_empty() {
                 self.topic_subscribers.remove(&topic);
             }
         }
-        if let Some(topics) = self.client_id_to_topics.get_mut(&client_id) {
+        if let Some(topics) = self.node_id_to_topics.get_mut(&node_id) {
             vec_remove_item(topics, &topic);
         }
     }
 
-    /// Extrait la logique de diffusion.
-    /// Identifie l'émetteur via sender_id (0 si c'est un serveur backend) pour potentiellement
-    /// empêcher le joueur de recevoir en écho ses propres paquets de mouvement.
+    /// La nouvelle fonction de routage magique. Elle lit le bit de poids fort
+    /// pour savoir instantanément vers quel peer (Public ou Privé) envoyer la trame.
     fn route_message(
         &self,
         message: BrokerMessage,
@@ -368,25 +385,19 @@ impl Broker {
     ) {
         let final_bytes = message.serialize();
 
-        // 1. Envoyer aux serveurs internes (Shards, IA, Director)
-        if let Some(servers) = self.internal_subscribers.get(&topic) {
-            for &uuid in servers {
-                if let Some(conn) = self.uuid_to_internal_conn.get(&uuid) {
+        if let Some(nodes) = self.topic_subscribers.get(&topic) {
+            for &node_id in nodes {
+                if let Some(conn) = self.node_id_to_connection.get(&node_id) {
                     if debug_print {
-                        println!("\t to {}", uuid);
+                        println!("\t to {:X}", node_id);
                     }
-                    let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
-                }
-            }
-        }
-        // 2. Envoyer aux clients abonnés
-        if let Some(clients) = self.topic_subscribers.get(&topic) {
-            for &client_id in clients {
-                if let Some(conn) = self.client_id_to_connection.get(&client_id) {
-                    if debug_print {
-                        println!("\t to {}", client_id);
+
+                    // L'Aiguillage à la vitesse de la lumière !
+                    if is_server(node_id) {
+                        let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
+                    } else {
+                        let _ = self.public_peer.send(conn, &stream, final_bytes.clone());
                     }
-                    let _ = self.public_peer.send(conn, &stream, final_bytes.clone());
                 }
             }
         }
