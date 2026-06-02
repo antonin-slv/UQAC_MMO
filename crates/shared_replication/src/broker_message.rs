@@ -71,12 +71,10 @@ impl TryFrom<u8> for ProtocolTag {
 pub type NodeId = u32;
 
 pub trait NodeIdMetaData {
-    // Les constantes associées au trait
     const FIRST_SERVER_ID: Self;
     const FIRST_CLIENT_ID: Self;
     const REFERENCE_TO_SENDER: Self;
 
-    // self par valeur (sans le &) car u32 est Copy
     fn is_client(&self) -> bool;
     fn is_server(&self) -> bool;
 }
@@ -84,7 +82,6 @@ pub trait NodeIdMetaData {
 impl NodeIdMetaData for NodeId {
     const FIRST_SERVER_ID: Self = 0x80000000;
     const FIRST_CLIENT_ID: Self = 1;
-    // Valeur spéciale pour indiquer que le message vient du client lui-même (utile pour les BroadcastFromClient)
     const REFERENCE_TO_SENDER: Self = 0;
     #[inline]
     fn is_client(&self) -> bool {
@@ -110,10 +107,7 @@ pub enum BrokerMessage {
 }
 
 impl BrokerMessage {
-    // --- HELPERS DEMANDÉS ---
-
     #[inline]
-    /// Retourne le tag binaire associé au message
     pub fn tag(&self) -> ProtocolTag {
         match self {
             Self::Subscribe { .. } => ProtocolTag::Subscribe,
@@ -127,22 +121,34 @@ impl BrokerMessage {
         }
     }
 
-    /// Retourne la taille minimale requise (header inclus) pour parser ce type de message
     pub fn min_len(tag: ProtocolTag) -> usize {
         let tl = Topic::topic_length();
         match tag {
-            ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => 1 + 4 + tl, // Tag(1) + ID(4) + Topic(16)
-            ProtocolTag::Publish => 1 + tl + 2, // Tag(1) + Topic(16) + Len(2) + [Payload]
-            ProtocolTag::Broadcast => 1 + 2,    // Tag(1) + Len(2) + [Payload]
-            ProtocolTag::BroadcastFromClient => 1 + 4 + 2, //tag + clientID + [Payload]
-            ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => 1 + 4, // Tag(1) + ID(4)
+            ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => 1 + 4 + tl,
+            ProtocolTag::Publish => 1 + tl + 2,
+            ProtocolTag::Broadcast => 1 + 2,
+            ProtocolTag::BroadcastFromClient => 1 + 4 + 2,
+            ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => 1 + 4,
             ProtocolTag::Welcome => 1 + 4,
         }
     }
 
-    // --- SÉRIALISATION / DÉSÉRIALISATION (ZÉRO PANIC) ---
+    // --- OUTILS DE LECTURE ZERO-COPY ---
 
-    /// Désérialisation sécurisée. Ne crashera jamais.
+    /// Regarde le tag du message encapsulé sans copier ni consommer la mémoire
+    pub fn peek_inner_tag(payload: &Bytes) -> Option<ProtocolTag> {
+        payload.first().and_then(|&b| ProtocolTag::try_from(b).ok())
+    }
+
+    /// Regarde l'ID déclaré dans le message encapsulé sans copier
+    pub fn peek_inner_client_id(payload: &Bytes) -> Option<NodeId> {
+        if payload.len() >= 5 {
+            Some(u32::from_le_bytes(payload[1..5].try_into().unwrap()))
+        } else {
+            None
+        }
+    }
+
     pub fn deserialize(mut payload: Bytes) -> Result<Self, ProtocolError> {
         if payload.is_empty() {
             return Err(ProtocolError::BufferTooShort {
@@ -152,108 +158,83 @@ impl BrokerMessage {
             });
         }
 
-        let tag = payload.get_u8();
-
-        let tag = match ProtocolTag::try_from(tag) {
-            Ok(tag) => tag,
-            Err(e) => return Err(e),
-        };
+        let tag = ProtocolTag::try_from(payload.get_u8())?;
         let real_payload_len = payload.len() + 1;
-
         let min_len = Self::min_len(tag);
 
         if real_payload_len < min_len {
             return Err(ProtocolError::BufferTooShort {
                 expected: min_len,
                 actual: real_payload_len,
-                context: "Vérification taille minimale",
+                context: "Taille minimale",
             });
         }
 
         match tag {
             ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => {
                 let client_id = payload.get_u32_le();
-                let topic = payload.split_to(Topic::topic_length());
-
-                let topic_as_topic = {
-                    let mut arr: Topic = [0u8; 16];
-                    arr.copy_from_slice(&topic);
-                    arr
-                };
+                let topic_bytes = payload.split_to(Topic::topic_length());
+                let mut topic = [0u8; 16];
+                topic.copy_from_slice(&topic_bytes);
 
                 if tag == ProtocolTag::Subscribe {
-                    Ok(Self::Subscribe {
-                        client_id,
-                        topic: topic_as_topic,
-                    })
+                    Ok(Self::Subscribe { client_id, topic })
                 } else {
-                    Ok(Self::Unsubscribe {
-                        client_id,
-                        topic: topic_as_topic,
-                    })
+                    Ok(Self::Unsubscribe { client_id, topic })
                 }
             }
             ProtocolTag::Publish => {
-                let topic = payload.split_to(Topic::topic_length());
-                let topic_as_topic = {
-                    let mut arr: Topic = [0u8; 16];
-                    arr.copy_from_slice(&topic);
-                    arr
-                };
+                let topic_bytes = payload.split_to(Topic::topic_length());
+                let mut topic = Topic::default_topic();
+                topic.copy_from_slice(&topic_bytes);
+
                 let payload_len = payload.get_u16_le() as usize;
 
-                // On vérifie que le payload variable est bien présent en entier
                 if payload.len() < payload_len {
                     return Err(ProtocolError::BufferTooShort {
                         expected: min_len + payload_len,
                         actual: real_payload_len,
-                        context: "Lecture du payload dynamique (Publish)",
+                        context: "Publish dynamique",
                     });
                 }
                 let publish_data = payload.split_to(payload_len);
                 Ok(Self::Publish {
-                    topic: topic_as_topic,
+                    topic,
                     payload: publish_data,
                 })
             }
 
             ProtocolTag::Broadcast => {
                 let payload_len = payload.get_u16_le() as usize;
-
                 if payload.len() >= payload_len {
-                    let playload = payload.split_to(payload_len);
-
-                    Ok(Self::Broadcast { payload: playload })
+                    Ok(Self::Broadcast {
+                        payload: payload.split_to(payload_len),
+                    })
                 } else {
                     Err(ProtocolError::BufferTooShort {
                         expected: min_len + payload_len,
                         actual: real_payload_len,
-                        context: "Lecture du payload dynamique (Broadcast)",
+                        context: "Deserialize Broadcast",
                     })
                 }
             }
             ProtocolTag::BroadcastFromClient => {
                 let client_id = payload.get_u32_le();
-                // 2. La taille (2 octets de 4 à 6)
                 let payload_len = payload.get_u16_le() as usize;
 
                 if payload.len() >= payload_len {
-                    // 3. Les données (à partir de 6)
-                    let playload = payload.split_to(payload_len);
-
                     Ok(Self::BroadCastFrom {
                         client_id,
-                        payload: playload,
+                        payload: payload.split_to(payload_len),
                     })
                 } else {
                     Err(ProtocolError::BufferTooShort {
                         expected: min_len + payload_len,
                         actual: real_payload_len,
-                        context: "Lecture du payload dynamique (BroadcastClientConnected)",
+                        context: "BroadcastFromClient",
                     })
                 }
             }
-
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => {
                 let client_id = payload.get_u32_le();
                 if tag == ProtocolTag::AuthorizeClient {
@@ -262,19 +243,13 @@ impl BrokerMessage {
                     Ok(Self::KickNode { client_id })
                 }
             }
-
             ProtocolTag::Welcome => {
                 let client_id = payload.get_u32_le();
-                if tag == ProtocolTag::Welcome {
-                    Ok(Self::Welcome { node_id: client_id })
-                } else {
-                    Err(ProtocolError::MalformedData("Welcome message"))
-                }
+                Ok(Self::Welcome { node_id: client_id })
             }
         }
     }
 
-    /// Sérialisation hyper performante via `BytesMut`
     pub fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::new();
         buf.put_u8(self.tag() as u8);
@@ -302,13 +277,9 @@ impl BrokerMessage {
                 buf.put_u16_le(payload.len() as u16);
                 buf.put_slice(payload);
             }
-            Self::AuthorizeClient { client_id } => {
-                buf.put_u32_le(*client_id);
-            }
-            Self::KickNode { client_id } => {
-                buf.put_u32_le(*client_id);
-            }
-            Self::Welcome { node_id: client_id } => {
+            Self::AuthorizeClient { client_id }
+            | Self::KickNode { client_id }
+            | Self::Welcome { node_id: client_id } => {
                 buf.put_u32_le(*client_id);
             }
         }
@@ -330,5 +301,4 @@ impl BrokerMessage {
         buf.put_u8(ProtocolTag::Publish as u8);
         buf.put_slice(topic);
     }
-
 }

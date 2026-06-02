@@ -65,14 +65,14 @@ pub trait TopicInterface {
 
     fn namespace(&self) -> Option<Namespace>;
 }
-pub type Topic = [u8; 16];
+pub type Topic = [u8; TOPIC_LENGTH as usize];
 
 pub trait TopicDefaults {
-    fn default() -> Self;
+    fn default_topic() -> Self;
     fn topic_length() -> usize;
 }
 impl TopicDefaults for Topic {
-    fn default() -> Self {
+    fn default_topic() -> Self {
         [0u8; 16] // Plus besoin de Bytes::from_static
     }
     fn topic_length() -> usize {
@@ -95,7 +95,7 @@ impl TopicInterface for Topic {
 // --- Le Builder pour créer des topics sans erreur ---
 #[derive(Debug, Clone)]
 pub struct TopicBuilder {
-    buffer: [u8; 16],
+    buffer: Topic,
     cursor: usize,
 }
 

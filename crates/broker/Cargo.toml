@@ -10,3 +10,4 @@ rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
 uuid = { workspace = true}
 nohash-hasher = "0.2"
 indexmap = "2.14.0"
+bytes = {workspace = true}

@@ -1994,6 +1994,7 @@ dependencies = [
 name = "broker"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "game_sockets",
  "indexmap",
  "nohash-hasher",

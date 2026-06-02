@@ -70,17 +70,10 @@ pub trait NetWriteTo {
 #[derive(Debug, Clone)]
 pub struct GamePayload {
     pub header: GameMessageHeaders,
-    pub data: Bytes, // Les données pures, zero-copy !
+    pub data: Bytes,
 }
 
 impl GamePayload {
-    /// Utilisé par MmoNetworkClient pour empaqueter avant envoi
-    pub fn to_network_bytes(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(1 + self.data.len());
-        buf.put_u8(self.header.clone() as u8);
-        buf.put_slice(&self.data);
-        buf.freeze()
-    }
     pub fn extract<T: GameMessage>(&mut self) -> Result<T, String> {
         if self.header == T::header() {
             T::deserialize(&mut self.data)
