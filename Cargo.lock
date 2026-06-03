@@ -4480,11 +4480,9 @@ dependencies = [
 name = "mock_spatial_auth_server"
 version = "0.1.0"
 dependencies = [
- "bollard",
  "dotenv",
  "shared_replication",
  "tokio",
- "uuid",
 ]
 
 [[package]]

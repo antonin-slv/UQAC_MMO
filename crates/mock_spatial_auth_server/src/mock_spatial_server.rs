@@ -4,38 +4,12 @@ use shared_replication::broker_topics::{
 };
 use shared_replication::msg_game_payload::GameMessageHeaders;
 
-use bollard::Docker;
 use shared_replication::broker_message::NodeId;
 use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use shared_replication::msg_dgs::{GameChunk, SpawnClientMsg, TakeChunkMessage};
 use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use std::time::Duration;
-
-async fn get_ip_of_named_container(docker: &Docker, container_name: &str) -> Option<String> {
-    let inspect_result = docker.inspect_container(container_name, None).await;
-    if inspect_result.is_err() {
-        eprintln!(
-            "Error inspecting container '{}': {:?}",
-            container_name,
-            inspect_result.err()
-        );
-        return None;
-    }
-    let inspect_result = inspect_result.unwrap_or(Default::default());
-    if let Some(network_settings) = inspect_result.network_settings {
-        if let Some(networks) = network_settings.networks {
-            if let Some(network_config) = networks.values().next() {
-                if let Some(ip_address) = &network_config.ip_address {
-                    if !ip_address.is_empty() {
-                        return Some(ip_address.clone());
-                    }
-                }
-            }
-        }
-    }
-    None
-}
 pub async fn run_spatial_auth_server() {
     println!("🌍 [Spatial/Auth] Démarrage du Cerveau Central...");
 
@@ -46,18 +20,10 @@ pub async fn run_spatial_auth_server() {
 
     let host_adress = env::var("HOST_ADDRESS").expect("Env HOST_ADRESS is not set");
 
-    let docker = Docker::connect_with_socket_defaults().expect("Failed to connect to docker");
-
-    let broker_ip: Option<String> = get_ip_of_named_container(&docker, "broker").await;
-    if broker_ip.is_none() {
-        eprintln!("❌ [Spatial/Auth] Impossible de trouver l'adresse IP du broker ");
-        return;
-    }
-    let broker_ip = broker_ip.unwrap();
     let mut broker_api = MmoNetworkClient::new();
     broker_api
         //todo : faire ça propre
-        .connect(broker_ip.as_ref(), broker_private_port)
+        .connect("broker", broker_private_port)
         .expect("😡 No connexion to broker "); // Se connecte au port Privé (Confiance Totale)
 
     let mut active_dgs: Vec<NodeId> = Vec::new();

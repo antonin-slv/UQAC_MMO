@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-uuid = { workspace = true }
 shared_replication = { workspace = true }
 dotenv = { workspace = true }
-bollard = "0.21"
 tokio = { workspace = true }

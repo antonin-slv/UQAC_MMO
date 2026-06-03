@@ -9,6 +9,7 @@ use quinn::congestion::BbrConfig;
 use quinn::{Connection, Endpoint, RecvStream, SendStream};
 use rustls::client::{ServerCertVerified, ServerCertVerifier};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -139,8 +140,16 @@ impl GameSocketBackend for QuicBackend {
                         match cmd {
                             BackendCommand::Bind { addr, port } => {
                                 let (server_config, _cert) = make_server_config();
-                                let addr = format!("{}:{}", addr, port).parse().unwrap();
-                                let endpoint = Endpoint::server(server_config, addr).unwrap();
+
+                                let ip_port = format!("{}:{}", addr, port);
+                                let remote : SocketAddr = match ip_port.parse() {
+                                    Ok(r) => r,
+                                    Err(_) => {
+                                        let mut addrs = tokio::net::lookup_host(&ip_port).await.expect("DNS resolution failed");
+                                        addrs.next().expect("No IP found for hostname")
+                                    }
+                                };
+                                let endpoint = Endpoint::server(server_config, remote).unwrap();
                                 let event_tx = event_tx.clone();
                                 let conn_reg_tx = conn_reg_tx.clone(); // Clone for task
                                 let stream_reg_tx = stream_reg_tx.clone();
@@ -165,7 +174,14 @@ impl GameSocketBackend for QuicBackend {
                                 let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).unwrap();
                                 endpoint.set_default_client_config(client_config);
 
-                                let remote = format!("{}:{}", addr, port).parse().unwrap();
+                                let ip_port = format!("{}:{}", addr, port);
+                                let remote : SocketAddr = match ip_port.parse() {
+                                    Ok(r) => r,
+                                    Err(_) => {
+                                        let mut addrs = tokio::net::lookup_host(&ip_port).await.expect("DNS resolution failed");
+                                        addrs.next().expect("No IP found for hostname")
+                                    }
+                                };
 
                                 match endpoint.connect(remote, "localhost").unwrap().await {
                                     Ok(connection) => {
