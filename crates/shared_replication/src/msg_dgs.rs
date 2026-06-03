@@ -15,7 +15,7 @@ impl NetWriteTo for TakeChunkMessage {
 
 impl GameMessage for TakeChunkMessage {
     fn header() -> GameMessageHeaders {
-        GameMessageHeaders::TakeChunk
+        GameMessageHeaders::ChunkHandOff
     }
 }
 

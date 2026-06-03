@@ -18,7 +18,7 @@ pub enum GameMessageHeaders {
     FriendHello = 0x0F, //When something that isn't a client says hello.
 
     //inter shard protocol
-    TakeChunk = 0x10,
+    ChunkHandOff = 0x10,
 
     DiscardedMessageBecauseYouKnow,
 }
@@ -39,7 +39,7 @@ impl From<u8> for GameMessageHeaders {
 
             0x0F => GameMessageHeaders::FriendHello,
 
-            0x10 => GameMessageHeaders::TakeChunk,
+            0x10 => GameMessageHeaders::ChunkHandOff,
 
             _ => GameMessageHeaders::DiscardedMessageBecauseYouKnow,
         }

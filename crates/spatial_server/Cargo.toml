@@ -7,5 +7,10 @@ edition = "2024"
 dotenv = { workspace = true }
 bevy = { workspace = true }
 shared_replication = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true}
 rand = "0.10"
-bevy_text_gizmos = "0.3"
+bevy_text_gizmos = { version = "0.3", optional = true }
+
+[features]
+debug_visual = ["bevy_text_gizmos"]

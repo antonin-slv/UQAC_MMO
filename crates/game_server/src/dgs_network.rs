@@ -318,7 +318,7 @@ fn route_message_events(
             }
         },
 
-        GameMessageHeaders::TakeChunk => match payload.extract::<TakeChunkMessage>() {
+        GameMessageHeaders::ChunkHandOff => match payload.extract::<TakeChunkMessage>() {
             Ok(msg_take_chunk) => {
                 msg_chunk_assigned.write(ChunkAssignedEvent {
                     chunk: msg_take_chunk.game_chunk,

@@ -75,7 +75,7 @@ impl DockerManager {
             image: Some(image),
             tty: Some(true),
             host_config: Some(HostConfig {
-                auto_remove: Some(false),
+                auto_remove: Some(true),
                 network_mode: Some("mmo_network".to_string()),
                 port_bindings: Some(port_bindings),
                 ..Default::default()
