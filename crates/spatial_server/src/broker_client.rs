@@ -1,5 +1,5 @@
+use crate::QuadTreeCommand;
 use crate::quadtree::Entity;
-use crate::{BROKER_URL_ENV_NAME, QuadTreeCommand};
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use shared_replication::broker_topics::{
     AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
@@ -9,6 +9,7 @@ use shared_replication::msg_game_payload::GameMessageHeaders;
 use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use tokio::sync::mpsc::Sender;
+const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
 pub struct BrokerClient {
     broker_api: MmoNetworkClient,
@@ -96,7 +97,7 @@ impl BrokerClient {
                 ClientNetworkEvent::DataReceived {
                     client_id,
                     stream: _,
-                    mut payload,
+                    payload,
                 } => match payload.header {
                     GameMessageHeaders::ClientHello => {
                         if sender

@@ -1,6 +1,7 @@
 use crate::shard_manager::ShardManager;
 pub(crate) use shared_replication::math::{Rect, Vec2};
 use std::env;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
@@ -11,6 +12,19 @@ pub struct Entity {
 impl Entity {
     pub fn new(id: u32, pos: Vec2) -> Self {
         Self { id, pos }
+    }
+}
+impl PartialEq for Entity {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Entity {}
+
+impl Hash for Entity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
     }
 }
 
@@ -178,7 +192,7 @@ impl QuadTree {
         if let Some(children) = self.children.as_mut() {
             let mut destroyed_shards: Vec<u32> = Vec::new();
             for child in children.iter_mut() {
-                for entity in shard_manager.drain_entities(child.shard_id).iter_mut() {
+                for entity in shard_manager.drain_entities(child.shard_id).iter() {
                     shard_manager.set_entity_shard(self.shard_id, entity.clone());
                 }
                 destroyed_shards.push(child.shard_id)

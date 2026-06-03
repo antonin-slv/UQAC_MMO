@@ -1,10 +1,10 @@
 use crate::quadtree::Entity;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 pub struct ShardManager {
     entities: HashMap<u32, u32>,
-    shards: HashMap<u32, Vec<Entity>>,
+    shards: HashMap<u32, HashSet<Entity>>,
 }
 
 impl ShardManager {
@@ -33,25 +33,27 @@ impl ShardManager {
         self.entities.insert(entity.id, shard_id);
         let shard = self.shards.get_mut(&shard_id);
         if let Some(shard) = shard {
-            shard.push(entity);
+            shard.insert(entity);
         } else {
-            self.shards.insert(shard_id, vec![entity]);
+            let mut shard = HashSet::new();
+            shard.insert(entity);
+            self.shards.insert(shard_id, shard);
         }
     }
 
     pub fn remove_entity_from_shard(&mut self, shard_id: u32, entity_id: u32) {
         if let Some(shard) = self.shards.get_mut(&shard_id) {
-            let entity_pos = shard.iter().position(|e| e.id == entity_id);
-            if let Some(entity_pos) = entity_pos {
-                shard.swap_remove(entity_pos);
+            let entity = shard.iter().find(|e| e.id == entity_id).cloned();
+            if let Some(entity) = entity {
+                shard.remove(&entity);
             }
         }
     }
 
-    pub fn drain_entities(&mut self, shard_id: u32) -> Vec<Entity> {
+    pub fn drain_entities(&mut self, shard_id: u32) -> HashSet<Entity> {
         let shard = self.shards.get(&shard_id);
 
-        let mut entities: Vec<Entity> = Vec::new();
+        let mut entities = HashSet::new();
 
         if let Some(shard) = shard {
             entities = shard.clone();
@@ -66,7 +68,7 @@ impl ShardManager {
     }
 
     pub fn count_entity_in_shard(&self, shard_id: u32) -> usize {
-        self.shards.get(&shard_id).map_or(0, Vec::len)
+        self.shards.get(&shard_id).map_or(0, HashSet::len)
     }
 
     pub fn get_entities(&self) -> Vec<Entity> {

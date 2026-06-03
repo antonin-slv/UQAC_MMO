@@ -22,7 +22,6 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 pub enum QuadTreeCommand {
     MoveEntity(Entity),
     TryMerge,
-    GetSnapshot(tokio::sync::oneshot::Sender<QuadTree>),
 }
 
 #[tokio::main]
@@ -52,9 +51,6 @@ async fn main() -> Result<()> {
 
                     #[cfg(feature = "debug_visual")]
                     let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
-                }
-                QuadTreeCommand::GetSnapshot(reply_channel) => {
-                    let _ = reply_channel.send(quad_tree.clone());
                 }
             }
         }
@@ -94,7 +90,7 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "debug_visual")]
     {
-        start_renderer(quadtree_tx.clone(), Mutex::new(bevy_rx));
+        start_renderer(Mutex::new(bevy_rx));
     }
 
     tokio::try_join!(broker_handle, scaler_handle)?;
