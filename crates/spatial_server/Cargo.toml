@@ -11,6 +11,9 @@ anyhow = { workspace = true}
 rand = "0.10"
 core_types = { workspace = true }
 bevy_text_gizmos = { version = "0.3", optional = true }
+broker_client = { workspace = true }
+game_message = { workspace = true }
+broker_protocol = { workspace = true }
 
 [features]
 debug_visual = ["bevy_text_gizmos"]
