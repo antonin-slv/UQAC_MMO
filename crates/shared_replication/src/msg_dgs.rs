@@ -1,10 +1,102 @@
 ﻿use crate::broker_message::NodeId;
+use crate::math::Rect;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
     pub game_chunk: GameChunk,
+}
+
+pub enum ChunkHandOffType {
+    TookAreaReady,
+    ReleasedArea,
+    ChunkStolen,
+}
+
+impl NetWrite for ChunkHandOffType {
+    fn serialize(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
+}
+
+impl NetWriteTo for ChunkHandOffType {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u8(match self {
+            ChunkHandOffType::TookAreaReady => 0u8,
+            ChunkHandOffType::ReleasedArea => 1u8,
+            ChunkHandOffType::ChunkStolen => 2u8,
+        });
+    }
+}
+
+impl NetRead for ChunkHandOffType {
+    fn deserialize(buf: &mut Bytes) -> Result<Self, String> {
+        let data = buf.get_u8();
+        match data {
+            0 => Ok(ChunkHandOffType::TookAreaReady),
+            1 => Ok(ChunkHandOffType::ReleasedArea),
+            2 => Ok(ChunkHandOffType::ChunkStolen),
+            _ => Err(format!("Unknown chunk handoff type {}", data)),
+        }
+    }
+}
+
+pub struct ChunkHandOff {
+    pub hand_off_type: ChunkHandOffType,
+    pub areas: Vec<Rect>,
+}
+
+impl NetWriteTo for ChunkHandOff {
+    fn write_to(&self, buf: &mut BytesMut) {
+        self.hand_off_type.write_to(buf);
+        buf.put_u8(self.areas.len() as u8);
+        for area in &self.areas {
+            area.write_to(buf);
+        }
+    }
+}
+
+impl GameMessage for ChunkHandOff {
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::ChunkHandOff
+    }
+}
+
+impl NetWrite for ChunkHandOff {
+    fn serialize(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(5);
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
+}
+
+impl NetRead for ChunkHandOff {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        match ChunkHandOffType::deserialize(data) {
+            Ok(hand_off_type) => {
+                let areas_len = data.get_u8() as usize;
+                let mut areas = Vec::with_capacity(areas_len);
+                for _ in 0..areas_len {
+                    let err = match Rect::deserialize(data) {
+                        Ok(rect) => Ok(areas.push(rect)),
+                        Err(e) => Err(format!("ChunkHandOffType : {}", e)),
+                    };
+                    if err.is_err() {
+                        return Err(err.unwrap_err());
+                    }
+                }
+
+                Ok(Self {
+                    hand_off_type,
+                    areas,
+                })
+            }
+            Err(e) => Err(format!("ChunkHandOffType : {}", e)),
+        }
+    }
 }
 
 impl NetWriteTo for TakeChunkMessage {

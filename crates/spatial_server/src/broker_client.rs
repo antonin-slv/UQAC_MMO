@@ -1,14 +1,15 @@
-use crate::QuadTreeCommand;
-use crate::quadtree::Entity;
+use crate::quadtree::{Entity, QuadTree};
+use crate::shard_manager::ShardManager;
 use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
-};
+use shared_replication::broker_message::NodeId;
+use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use shared_replication::math::Vec2;
-use shared_replication::msg_game_payload::GameMessageHeaders;
+use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
+use shared_replication::msg_dgs::{ChunkHandOff, GameChunk, SpawnClientMsg, TakeChunkMessage};
+use shared_replication::msg_game_payload::{GameMessageHeaders, GamePayload};
 use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
-use tokio::sync::mpsc::Sender;
+
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
 pub struct BrokerClient {
@@ -53,12 +54,17 @@ impl BrokerClient {
         }
     }
 
-    pub async fn poll_handle(&mut self, sender: &Sender<QuadTreeCommand>) {
+    pub async fn poll_handle(
+        &mut self,
+        quad_tree: &mut QuadTree,
+        shard_manager: &mut ShardManager,
+    ) {
         while let Some(event) = self.broker_api.poll() {
             match event {
                 ClientNetworkEvent::Ready => {
                     println!("[Server] Connection ready");
 
+                    // Auth to broker
                     let msg = ServerHelloMSG {
                         server_type: ServerType::Spatial,
                         id: self.broker_api.node_id.unwrap_or_else(|| {
@@ -72,21 +78,29 @@ impl BrokerClient {
                         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                             .build();
                     self.broker_api.publish_reliable(auth_topic.clone(), &msg);
-                    println!("[Orchestrator] Handshake 'Hello' envoyé.");
 
-                    let auth_public_listen = TopicBuilder::new(
-                        SecurityDomain::PrivateReadPublicWrite,
-                        AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
-                    )
-                    .build();
-                    self.broker_api.subscribe(auth_public_listen, 0);
-                    println!("[Orchestrator] Abonné au topic Auth Public Clients.");
+                    // ================= Subscriptions ===================
 
-                    let hand_off_responses =
+                    self.broker_api.subscribe(
+                        TopicBuilder::new(
+                            SecurityDomain::PrivateReadPublicWrite,
+                            Namespace::ClientAuth,
+                        )
+                        .build(),
+                        0,
+                    );
+
+                    self.broker_api.subscribe(
                         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer)
-                            .build();
-                    self.broker_api.subscribe(hand_off_responses, 0);
-                    println!("[Orchestrator] Abonné au topic réponses des Hands off.");
+                            .build(),
+                        0,
+                    );
+
+                    self.broker_api.subscribe(
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
+                            .build(),
+                        0,
+                    );
                 }
                 ClientNetworkEvent::Connected => {
                     println!("[Server] Connecté au Broker (Still not ready)...");
@@ -97,23 +111,23 @@ impl BrokerClient {
                 ClientNetworkEvent::DataReceived {
                     client_id,
                     stream: _,
-                    payload,
+                    mut payload,
                 } => match payload.header {
                     GameMessageHeaders::ClientHello => {
-                        if sender
-                            .send(QuadTreeCommand::MoveEntity(Entity::new(
-                                client_id,
-                                Vec2::new(
-                                    rand::random_range(-300.0..300.0),
-                                    rand::random_range(-300.0..300.0),
-                                ),
-                            )))
-                            .await
-                            .is_err()
-                        {
-                            println!("[Acteur QuadTree] Failed to send move entity (id 3)");
+                        let msg = payload.extract::<ClientHelloMsg>();
+                        if msg.is_err() {
+                            println!(
+                                "⚠️ [Auth] Message ClientHello mal formé : {}",
+                                msg.err().unwrap()
+                            );
+                            continue;
                         }
-                        println!("[Orchestrator] Got ClientHello");
+                        let msg = msg.unwrap();
+                        self.on_new_client_connected(client_id, quad_tree, shard_manager, msg)
+                            .await;
+                    }
+                    GameMessageHeaders::FriendHello => {
+                        self.on_server_connected(payload, shard_manager).await;
                     }
                     GameMessageHeaders::ChunkHandOff => {
                         println!("[Orchestrator] Got ChunkHandOff");
@@ -122,5 +136,123 @@ impl BrokerClient {
                 },
             }
         }
+    }
+
+    async fn on_server_connected(
+        &self,
+        mut payload: GamePayload,
+        shard_manager: &mut ShardManager,
+    ) {
+        let friend = payload.extract::<ServerHelloMSG>();
+        if friend.is_err() {
+            eprintln!(
+                "⚠️ [Spatial] Message FriendHello mal formé : {}",
+                friend.err().unwrap()
+            );
+            return;
+        }
+        let friend = friend.unwrap();
+
+        let server_type = friend.server_type;
+
+        if server_type == ServerType::Server {
+            let dgs_net_id = friend.id;
+            println!("🗺️ [Spatial] Nouveau DGS détecté : {}", dgs_net_id);
+            shard_manager.on_new_dgs(dgs_net_id);
+        }
+    }
+
+    async fn on_new_client_connected(
+        &mut self,
+        client_id: NodeId,
+        quad_tree: &mut QuadTree,
+        shard_manager: &mut ShardManager,
+        msg: ClientHelloMsg,
+    ) {
+        println!("[Orchestrator] On new client connected");
+
+        quad_tree.insert(
+            Entity::new(
+                client_id,
+                Vec2::new(
+                    rand::random_range(-300.0..300.0),
+                    rand::random_range(-300.0..300.0),
+                ),
+            ),
+            shard_manager,
+        );
+
+        println!(
+            "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",
+            client_id, msg.pseudo
+        );
+
+        let con_ok = true; // AUTHENTIFICATION ICI !
+
+        if !con_ok {
+            println!(
+                "🔑 [Auth] Rejet de la connexion du client {} (pseudo: {})",
+                client_id, msg.pseudo
+            );
+            self.broker_api.kick_client(client_id);
+            return;
+        }
+
+        self.broker_api.authorize_client(client_id);
+
+        let shard = shard_manager.get_shard_bounds_for_client(client_id, quad_tree);
+        if let Some((dgs_id, bounds)) = shard {
+            let chunk = GameChunk {
+                x: bounds.min_x as i16,
+                y: bounds.min_y as i16,
+            };
+
+            let chunk_state =
+                TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
+                    .append_chunk(&chunk)
+                    .build();
+
+            self.broker_api.subscribe(chunk_state, client_id);
+            println!(
+                "🔑 [Auth] Le Broker a abonné le joueur {} au Chunk {}:{}.",
+                client_id, chunk.x, chunk.y
+            );
+
+            let server_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                .append_id(dgs_id)
+                .build();
+
+            // B) Dire au server de faire spawn :
+            let msg = SpawnClientMsg {
+                client_id,
+                pseudo: msg.pseudo.to_string(),
+                chunk: chunk.clone(),
+            };
+
+            self.broker_api.publish_reliable(server_topic, &msg);
+            let msg = ClientWelcomeMsg { client_id, chunk };
+            let client_topic =
+                TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::NodeLine)
+                    .append_id(client_id)
+                    .build();
+            self.broker_api.publish_reliable(client_topic, &msg);
+        } else {
+            eprintln!("[BROKER] Shard not found for spawn player")
+        }
+    }
+
+    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, chunk_hand_off: ChunkHandOff) {
+        let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+            .append_id(dgs_id)
+            .build();
+
+        let msg = TakeChunkMessage {
+            game_chunk: GameChunk {
+                x: chunk_hand_off.areas.len() as i16,
+                y: chunk_hand_off.areas.len() as i16,
+            },
+        };
+
+        self.broker_api.publish_reliable(topic, &msg);
     }
 }

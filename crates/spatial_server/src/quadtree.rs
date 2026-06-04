@@ -1,16 +1,19 @@
 use crate::shard_manager::ShardManager;
+use shared_replication::broker_message::NodeId;
 pub(crate) use shared_replication::math::{Rect, Vec2};
 use std::env;
 use std::hash::{Hash, Hasher};
 
+pub type ShardId = u32;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
-    pub id: u32,
+    pub id: NodeId,
     pub pos: Vec2,
 }
 
 impl Entity {
-    pub fn new(id: u32, pos: Vec2) -> Self {
+    pub fn new(id: NodeId, pos: Vec2) -> Self {
         Self { id, pos }
     }
 }
@@ -36,7 +39,7 @@ pub struct QuadTree {
     pub subdivide_threshold: usize,
     pub merge_threshold: usize,
     pub children: Option<Box<[QuadTree; 4]>>,
-    pub shard_id: u32,
+    pub shard_id: ShardId,
 }
 
 impl QuadTree {
@@ -76,7 +79,7 @@ impl QuadTree {
         max_depth: u8,
         subdivide_threshold: usize,
         merge_threshold: usize,
-        shard_id: u32,
+        shard_id: ShardId,
     ) -> Self {
         Self {
             bounds,
@@ -190,7 +193,7 @@ impl QuadTree {
 
     fn merge(&mut self, shard_manager: &mut ShardManager) {
         if let Some(children) = self.children.as_mut() {
-            let mut destroyed_shards: Vec<u32> = Vec::new();
+            let mut destroyed_shards: Vec<ShardId> = Vec::new();
             for child in children.iter_mut() {
                 for entity in shard_manager.drain_entities(child.shard_id).iter() {
                     shard_manager.set_entity_shard(self.shard_id, entity.clone());
@@ -202,8 +205,8 @@ impl QuadTree {
         }
     }
 
-    fn generate_shard_id(&mut self) -> Vec<u32> {
-        let mut shard_ids: Vec<u32> = Vec::new();
+    fn generate_shard_id(&mut self) -> Vec<ShardId> {
+        let mut shard_ids: Vec<ShardId> = Vec::new();
         let offset = self.depth * 2;
         for i in 0..4 {
             let mut child_id = i;
@@ -212,5 +215,17 @@ impl QuadTree {
             shard_ids.push(child_id);
         }
         shard_ids
+    }
+
+    pub fn get_shard_bounds(&self, shard_id: &ShardId) -> Option<Rect> {
+        if *shard_id == self.shard_id {
+            return Some(self.bounds.clone());
+        }
+
+        if let Some(children) = &self.children {
+            let child_id = ((shard_id >> self.depth * 2) & 3) as usize;
+            return children[child_id].get_shard_bounds(shard_id);
+        }
+        None
     }
 }

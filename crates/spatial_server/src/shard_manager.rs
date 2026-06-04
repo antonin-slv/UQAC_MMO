@@ -1,10 +1,14 @@
-use crate::quadtree::Entity;
-use std::collections::{HashMap, HashSet};
+use crate::quadtree::{Entity, QuadTree, ShardId};
+use shared_replication::broker_message::NodeId;
+use shared_replication::math::Rect;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone)]
 pub struct ShardManager {
-    entities: HashMap<u32, u32>,
-    shards: HashMap<u32, HashSet<Entity>>,
+    entities: HashMap<NodeId, ShardId>,
+    shards: HashMap<ShardId, HashSet<Entity>>,
+    active_dgs: HashMap<NodeId, HashSet<ShardId>>,
+    shard_without_dgs: VecDeque<ShardId>,
 }
 
 impl ShardManager {
@@ -12,18 +16,30 @@ impl ShardManager {
         Self {
             entities: HashMap::new(),
             shards: HashMap::new(),
+            active_dgs: HashMap::new(),
+            shard_without_dgs: VecDeque::new(),
         }
     }
 
-    pub fn on_new_shard(&mut self, shard_ids: Vec<u32>) {
-        println!("on_new_shard: {:?}", shard_ids);
+    pub fn on_new_shard(&mut self, shards: Vec<ShardId>) {
+        for i in 0..4 {
+            self.shard_without_dgs.push_front(shards[i]);
+        }
     }
 
-    pub fn on_shard_destroyed(&mut self, shard_id: Vec<u32>) {
+    pub fn on_shard_destroyed(&mut self, shard_id: Vec<ShardId>) {
         println!("on_shard_destroyed: {:?}", shard_id);
     }
 
-    pub fn set_entity_shard(&mut self, shard_id: u32, entity: Entity) {
+    pub fn on_new_dgs(&mut self, dgs_id: NodeId) {
+        let mut shards = HashSet::new();
+        if let Some(shard_id) = self.shard_without_dgs.pop_front() {
+            shards.insert(shard_id);
+        }
+        self.active_dgs.insert(dgs_id, shards);
+    }
+
+    pub fn set_entity_shard(&mut self, shard_id: ShardId, entity: Entity) {
         let old_shard_id = self.get_shard(entity.id);
         if let Some(old_shard_id) = old_shard_id
             && old_shard_id != shard_id
@@ -41,16 +57,16 @@ impl ShardManager {
         }
     }
 
-    pub fn remove_entity_from_shard(&mut self, shard_id: u32, entity_id: u32) {
+    pub fn remove_entity_from_shard(&mut self, shard_id: ShardId, entity_id: NodeId) {
         if let Some(shard) = self.shards.get_mut(&shard_id) {
-            let entity = shard.iter().find(|e| e.id == entity_id).cloned();
-            if let Some(entity) = entity {
-                shard.remove(&entity);
-            }
+            shard.remove(&Entity::new(
+                entity_id,
+                shared_replication::math::Vec2::new(0.0, 0.0),
+            ));
         }
     }
 
-    pub fn drain_entities(&mut self, shard_id: u32) -> HashSet<Entity> {
+    pub fn drain_entities(&mut self, shard_id: ShardId) -> HashSet<Entity> {
         let shard = self.shards.get(&shard_id);
 
         let mut entities = HashSet::new();
@@ -63,11 +79,29 @@ impl ShardManager {
         entities
     }
 
-    pub fn get_shard(&self, entity_id: u32) -> Option<u32> {
+    pub fn get_shard(&self, entity_id: NodeId) -> Option<u32> {
         self.entities.get(&entity_id).cloned()
     }
 
-    pub fn count_entity_in_shard(&self, shard_id: u32) -> usize {
+    pub fn get_shard_bounds_for_client(
+        &self,
+        client_id: NodeId,
+        quad_tree: &QuadTree,
+    ) -> Option<(NodeId, Rect)> {
+        if let Some(shard_id) = self.entities.get(&client_id).cloned() {
+            let shard_bounds = quad_tree.get_shard_bounds(&shard_id).unwrap();
+            let (dgs, _) = self
+                .active_dgs
+                .iter()
+                .find(|(_, shards)| shards.contains(&shard_id))
+                .unwrap();
+            return Some((dgs.clone(), shard_bounds));
+        }
+
+        None
+    }
+
+    pub fn count_entity_in_shard(&self, shard_id: ShardId) -> usize {
         self.shards.get(&shard_id).map_or(0, HashSet::len)
     }
 

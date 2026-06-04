@@ -96,7 +96,7 @@ impl RedisManager {
     pub async fn get_available_servers(&self) -> Result<Vec<GameServer>> {
         let mut servers = self.get_all_servers().await?;
 
-        servers.retain(|server| server.players_online < server.players_max);
+        servers.retain(|server| server.players_online == 0);
 
         Ok(servers)
     }
