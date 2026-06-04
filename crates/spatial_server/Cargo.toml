@@ -6,10 +6,10 @@ edition = "2024"
 [dependencies]
 dotenv = { workspace = true }
 bevy = { workspace = true }
-shared_replication = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true}
 rand = "0.10"
+core_types = { workspace = true }
 bevy_text_gizmos = { version = "0.3", optional = true }
 
 [features]

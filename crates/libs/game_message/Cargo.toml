@@ -1,0 +1,16 @@
+[package]
+name = "game_message"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "game_message"
+path = "src/game_message.rs"
+
+[dependencies]
+broker_protocol = { workspace = true }
+core_types = { workspace = true }
+bytes = { workspace = true }
+rocket = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }

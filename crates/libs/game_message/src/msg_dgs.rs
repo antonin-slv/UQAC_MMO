@@ -1,6 +1,8 @@
-﻿use crate::broker_message::NodeId;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+﻿use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use core_types::GameChunk;
+use rocket::serde::json::serde_json;
 use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
@@ -34,12 +36,6 @@ impl NetRead for TakeChunkMessage {
             Err(e) => Err(format!("TakeChunkMessage : {}", e)),
         }
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GameChunk {
-    pub x: i16,
-    pub y: i16,
 }
 
 impl NetWriteTo for GameChunk {

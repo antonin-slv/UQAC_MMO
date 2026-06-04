@@ -1,10 +1,10 @@
-﻿use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
-use bevy::tasks::{IoTaskPool, Task};
-use futures_lite::future;
-use crate::client_network::NetworkManager;
+﻿use crate::client_network::NetworkManager;
 use crate::structs::{ClientState, LocalPlayer};
-use shared_replication::{LoginResponse, Login, Register};
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task};
+use bevy_egui::{EguiContexts, EguiPlugin, egui};
+use futures_lite::future;
+use not_games::{Login, LoginResponse, Register};
 
 // Les données tapées par l'utilisateur
 #[derive(Resource)]
@@ -33,7 +33,7 @@ fn ui_login_menu(
     mut ui_data: ResMut<LoginUiData>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<ClientState>>,
-    mut local_player: ResMut<LocalPlayer>
+    mut local_player: ResMut<LocalPlayer>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         println!("Impossible d'obtenir le contexte Egui");
@@ -91,7 +91,10 @@ fn ui_login_menu(
 
                         match res {
                             Ok(response) if response.status().is_success() => {
-                                let data = response.json::<LoginResponse>().await.map_err(|e| e.to_string())?;
+                                let data = response
+                                    .json::<LoginResponse>()
+                                    .await
+                                    .map_err(|e| e.to_string())?;
                                 Ok(data)
                             }
                             Ok(response) => Err(format!("Erreur: {}", response.status())),
@@ -134,7 +137,10 @@ fn ui_login_menu(
 
                         match res {
                             Ok(response) if response.status().is_success() => {
-                                let data = response.json::<LoginResponse>().await.map_err(|e| e.to_string())?;
+                                let data = response
+                                    .json::<LoginResponse>()
+                                    .await
+                                    .map_err(|e| e.to_string())?;
                                 Ok(data)
                             }
                             Ok(response) => Err(format!("Erreur: {}", response.status())),
@@ -167,17 +173,22 @@ fn handle_login_task(
     for (entity, mut task) in tasks.iter_mut() {
         // block_on avec poll (now_or_never) ne bloque pas le jeu !
         if let Some(result) = future::block_on(future::poll_once(&mut task.0)) {
-
             // La requête HTTP est terminée, on détruit la tâche
             commands.entity(entity).despawn();
 
             match result {
                 Ok(login_response) => {
                     println!("Succès ! ID Joueur: {}", login_response.player_id);
-                    println!("Connexion au serveur cible: {}:{}", login_response.server.ip, login_response.server.port);
+                    println!(
+                        "Connexion au serveur cible: {}:{}",
+                        login_response.server.ip, login_response.server.port
+                    );
 
                     // --- On tente de se connecter au server ici --- cf network pour la suite.
-                    match net.client.connect(login_response.server.ip.as_str(), login_response.server.port) {
+                    match net.client.connect(
+                        login_response.server.ip.as_str(),
+                        login_response.server.port,
+                    ) {
                         Ok(_) => {}
                         Err(e) => {
                             eprintln!("{}", e);
@@ -206,7 +217,13 @@ impl Plugin for LauncherPlugin {
             .init_state::<ClientState>()
             .init_resource::<LoginUiData>()
             // Le menu ne s'affiche que dans l'état LoginMenu
-            .add_systems(bevy_egui::EguiPrimaryContextPass, ui_login_menu.run_if(in_state(ClientState::LoginMenu)))
-            .add_systems(Update, handle_login_task.run_if(in_state(ClientState::Connecting)));
+            .add_systems(
+                bevy_egui::EguiPrimaryContextPass,
+                ui_login_menu.run_if(in_state(ClientState::LoginMenu)),
+            )
+            .add_systems(
+                Update,
+                handle_login_task.run_if(in_state(ClientState::Connecting)),
+            );
     }
 }

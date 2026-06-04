@@ -3,15 +3,14 @@
 use crate::events;
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
+use broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use broker_protocol::broker_message::NodeId;
+use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_message::NodeId;
-use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use shared_replication::msg_game_payload::{GameMessageHeaders, GamePayload};
-
-use shared_replication::msg_client_server::*;
-use shared_replication::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
-use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use game_message::{GameMessageHeaders, GamePayload};
+use game_message::msg_client_server::*;
+use game_message::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";

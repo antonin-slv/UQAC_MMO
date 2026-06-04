@@ -1,9 +1,9 @@
-﻿use crate::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
-use crate::broker_topics::Topic;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, GamePayload};
+﻿use broker_protocol::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
+use broker_protocol::broker_topics::Topic;
 use bytes::{Buf, BytesMut};
-use game_sockets::GameSocketError;
+use game_message::{GameMessage, GameMessageHeaders, GamePayload};
 use game_sockets::protocols::QuicBackend;
+use game_sockets::GameSocketError;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameStreamReliability};
 
 /// Les événements simplifiés remontés au moteur de jeu (Bevy)
@@ -119,9 +119,9 @@ impl MmoNetworkClient {
                         }
 
                         Ok(BrokerMessage::BroadCastFrom {
-                            client_id,
-                            mut payload,
-                        }) => {
+                               client_id,
+                               mut payload,
+                           }) => {
                             if payload.is_empty() {
                                 continue;
                             }
@@ -228,7 +228,7 @@ impl MmoNetworkClient {
         // L'unique allocation de tout le processus
         let mut buf = BytesMut::with_capacity(32);
         // On délègue la responsabilité de l'ordre d'écriture au BrokerMessage
-        BrokerMessage::write_publish_to(&mut buf, &topic, message);
+        GamePayload::write_publish_to(&mut buf, &topic, message);
 
         self.send_raw(&self.stream_unreliable, buf.freeze());
     }
@@ -236,7 +236,7 @@ impl MmoNetworkClient {
     /// Publie une donnée critique (ex: Achat, Handoff).
     pub fn publish_reliable<T: GameMessage>(&self, topic: Topic, message: &T) {
         let mut buf = BytesMut::with_capacity(32);
-        BrokerMessage::write_publish_to(&mut buf, &topic, message);
+        GamePayload::write_publish_to(&mut buf, &topic, message);
         self.send_raw(&self.stream_reliable, buf.freeze());
     }
 

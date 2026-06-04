@@ -5,17 +5,26 @@ members = [
     "crates/game_server",
     "crates/gate_keeper",
     "crates/orchestrator",
-    "crates/shared_replication",
-    "crates/game_sockets",
+    "crates/libs/game_sockets",
     "crates/spatial_server",
     "crates/broker",
-    "crates/mock_spatial_auth_server"]
+    "crates/mock_spatial_auth_server",
+    "crates/libs/broker_client",
+    "crates/libs/not_games",
+    "crates/libs/core_types",
+    "crates/libs/broker_protocol",
+    "crates/libs/game_message"
+]
 
 
 #common dependencies
 [workspace.dependencies]
-game_sockets = { path = "crates/game_sockets" }
-shared_replication = { path = "crates/shared_replication" }
+game_sockets = { path = "crates/libs/game_sockets" }
+broker_client = { path = "crates/libs/broker_client" }
+not_games = { path = "crates/libs/not_games" }
+core_types = { path = "crates/libs/core_types" }
+broker_protocol = { path = "crates/libs/broker_protocol" }
+game_message = { path = "crates/libs/game_message" }
 
 # --- Moteurs et Réseau ---
 bevy = "0.18.1"

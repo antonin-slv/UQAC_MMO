@@ -4,16 +4,14 @@ use rustc_hash::FxHashMap;
 use std::env;
 use uuid::Uuid;
 
-use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
-use shared_replication::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
-use shared_replication::broker_message::{
-    BrokerMessage, NodeId, NodeIdMetaData, ProtocolTag, RELIABLE_STREAM_ID,
-};
-use shared_replication::broker_topics;
-use shared_replication::broker_topics::{
+use broker_protocol::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
+use broker_protocol::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
+use broker_protocol::broker_topics;
+use broker_protocol::broker_topics::{
     Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
 };
+use game_sockets::protocols::QuicBackend;
+use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
