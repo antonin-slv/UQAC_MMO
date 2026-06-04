@@ -2,6 +2,15 @@
 
 WORKDIR /usr/src/app
 
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libx11-dev \
+    libasound2-dev \
+    libudev-dev \
+    libwayland-dev \
+    libxkbcommon-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copie du projet
 COPY . .
 

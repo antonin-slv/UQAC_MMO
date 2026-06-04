@@ -1,6 +1,7 @@
 use crate::shard_manager::ShardManager;
 pub(crate) use shared_replication::math::{Rect, Vec2};
 use std::env;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
@@ -13,14 +14,27 @@ impl Entity {
         Self { id, pos }
     }
 }
+impl PartialEq for Entity {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
 
+impl Eq for Entity {}
+
+impl Hash for Entity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+#[derive(Clone)]
 pub struct QuadTree {
     pub bounds: Rect,
     pub depth: u8,
     pub max_depth: u8,
     pub subdivide_threshold: usize,
     pub merge_threshold: usize,
-    pub entities: Vec<Entity>,
     pub children: Option<Box<[QuadTree; 4]>>,
     pub shard_id: u32,
 }
@@ -39,20 +53,9 @@ impl QuadTree {
             max_y: world_size,
         };
 
-        let max_depth = env::var("QUADTREE_MAX_DEPTH")
-            .expect("Env QUADTREE_MAX_DEPTH is not set")
-            .parse()
-            .expect("Env QUADTREE_MAX_DEPTH is not a number");
-
-        let subdivide_threshold = env::var("SUBDIVIDE_THRESHOLD")
-            .expect("Env SUBDIVIDE_THRESHOLD is not set")
-            .parse()
-            .expect("Env SUBDIVIDE_THRESHOLD is not a number");
-
-        let merge_threshold = env::var("MERGE_THRESHOLD")
-            .expect("Env MERGE_THRESHOLD is not set")
-            .parse()
-            .expect("Env MERGE_THRESHOLD is not a number");
+        let max_depth = env::var("QUADTREE_MAX_DEPTH").unwrap().parse().unwrap();
+        let subdivide_threshold = env::var("SUBDIVIDE_THRESHOLD").unwrap().parse().unwrap();
+        let merge_threshold = env::var("MERGE_THRESHOLD").unwrap().parse().unwrap();
 
         let mut quadtree = Self::new_internal(
             map_size,
@@ -64,7 +67,6 @@ impl QuadTree {
         );
 
         quadtree.subdivide(shard_manager);
-
         quadtree
     }
 
@@ -82,13 +84,12 @@ impl QuadTree {
             max_depth,
             subdivide_threshold,
             merge_threshold,
-            entities: Vec::with_capacity(subdivide_threshold),
             children: None,
             shard_id,
         }
     }
 
-    fn insert(&mut self, entity: Entity, shard_manager: &mut ShardManager) -> bool {
+    pub fn insert(&mut self, entity: Entity, shard_manager: &mut ShardManager) -> bool {
         if !self.bounds.contains(entity.pos) {
             return false;
         }
@@ -102,10 +103,11 @@ impl QuadTree {
             return false;
         }
 
-        self.entities.push(entity);
-        shard_manager.set_entity_shard(self.shard_id, entity.id);
+        shard_manager.set_entity_shard(self.shard_id, entity);
 
-        if self.entities.len() > self.subdivide_threshold && self.depth < self.max_depth {
+        if shard_manager.count_entity_in_shard(self.shard_id) > self.subdivide_threshold
+            && self.depth < self.max_depth
+        {
             self.subdivide(shard_manager);
         }
 
@@ -114,9 +116,7 @@ impl QuadTree {
 
     fn subdivide(&mut self, shard_manager: &mut ShardManager) {
         let sub_bounds = self.bounds.split();
-
         let shard_ids = self.generate_shard_id();
-        println!("{:?}", sub_bounds[0]);
 
         let mut children = Box::new([
             QuadTree::new_internal(
@@ -125,7 +125,7 @@ impl QuadTree {
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids.get(0).cloned().unwrap_or_default(),
+                shard_ids[0],
             ),
             QuadTree::new_internal(
                 sub_bounds[1],
@@ -133,7 +133,7 @@ impl QuadTree {
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids.get(1).cloned().unwrap_or_default(),
+                shard_ids[1],
             ),
             QuadTree::new_internal(
                 sub_bounds[2],
@@ -141,7 +141,7 @@ impl QuadTree {
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids.get(2).cloned().unwrap_or_default(),
+                shard_ids[2],
             ),
             QuadTree::new_internal(
                 sub_bounds[3],
@@ -149,11 +149,11 @@ impl QuadTree {
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids.get(3).cloned().unwrap_or_default(),
+                shard_ids[3],
             ),
         ]);
 
-        for entity in self.entities.drain(..) {
+        for entity in shard_manager.drain_entities(self.shard_id) {
             for child in children.iter_mut() {
                 if child.insert(entity, shard_manager) {
                     break;
@@ -162,12 +162,11 @@ impl QuadTree {
         }
 
         shard_manager.on_new_shard(shard_ids);
-
         self.children = Some(children);
     }
 
     pub fn try_merge(&mut self, shard_manager: &mut ShardManager) {
-        let entity_count = self.count_entities();
+        let entity_count = self.count_entities(shard_manager);
         if let Some(children) = self.children.as_mut() {
             if entity_count < self.merge_threshold {
                 self.merge(shard_manager);
@@ -179,14 +178,13 @@ impl QuadTree {
         }
     }
 
-    fn count_entities(&self) -> usize {
-        let mut count = self.entities.len();
+    fn count_entities(&self, shard_manager: &mut ShardManager) -> usize {
+        let mut count = shard_manager.count_entity_in_shard(self.shard_id);
         if let Some(children) = &self.children {
             for child in children.iter() {
-                count += child.count_entities();
+                count += child.count_entities(shard_manager);
             }
         }
-
         count
     }
 
@@ -194,15 +192,12 @@ impl QuadTree {
         if let Some(children) = self.children.as_mut() {
             let mut destroyed_shards: Vec<u32> = Vec::new();
             for child in children.iter_mut() {
-                for entity in child.entities.iter_mut() {
-                    shard_manager.set_entity_shard(self.shard_id, entity.id);
-                    self.entities.push(*entity);
+                for entity in shard_manager.drain_entities(child.shard_id).iter() {
+                    shard_manager.set_entity_shard(self.shard_id, entity.clone());
                 }
-
                 destroyed_shards.push(child.shard_id)
             }
             shard_manager.on_shard_destroyed(destroyed_shards);
-
             self.children = None;
         }
     }
@@ -217,31 +212,5 @@ impl QuadTree {
             shard_ids.push(child_id);
         }
         shard_ids
-    }
-
-    pub fn move_entity(&mut self, entity: Entity, shard_manager: &mut ShardManager) {
-        let old_shard_id = shard_manager.get_shard(entity.id);
-        if let Some(old_shard_id) = old_shard_id {
-            self.remove_entity(entity, old_shard_id, shard_manager)
-        }
-
-        self.insert(entity, shard_manager);
-
-        if let Some(old_shard_id) = old_shard_id
-            && let Some(current_shard_id) = shard_manager.get_shard(entity.id)
-            && old_shard_id != current_shard_id
-        {}
-    }
-
-    fn remove_entity(&mut self, entity: Entity, shard_id: u32, shard_manager: &mut ShardManager) {
-        if let Some(children) = self.children.as_mut() {
-            let child_id = ((shard_id >> self.depth * 2) & 3) as usize;
-            children[child_id].remove_entity(entity, shard_id, shard_manager)
-        }
-
-        let entity_pos = self.entities.iter().position(|e| e.id == entity.id);
-        if let Some(entity_pos) = entity_pos {
-            self.entities.swap_remove(entity_pos);
-        }
     }
 }
