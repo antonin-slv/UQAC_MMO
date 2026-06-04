@@ -1,12 +1,12 @@
+use crate::{BackendCommand, GameNetworkEvent, GameSocketBackend, GameStream};
+use bytes::{BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use bytes::{BufMut, Bytes, BytesMut};
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use crate::{BackendCommand, GameNetworkEvent, GameSocketBackend, GameStream};
 
 // Protocol Constants
 const HEADER_SIZE: usize = 18; // 16 bytes (UUID) + 2 bytes (StreamID)
@@ -76,7 +76,7 @@ impl UdpBackend {
                         self.socket = Some(Arc::new(s));
                     }
                 }
-                
+
                 if let Ok(socket_addr) = format!("{}:{}", addr, port).parse::<SocketAddr>() {
                     let uuid = Uuid::new_v4();
                     self.connections.insert(uuid, socket_addr);
@@ -129,7 +129,7 @@ impl UdpBackend {
             streams.push(stream_id);
             let _ = event_tx.send(GameNetworkEvent::StreamCreated(
                 incoming_uuid.into(),
-                stream_id.into()
+                stream_id.into(),
             ));
         }
 
@@ -138,7 +138,7 @@ impl UdpBackend {
         let _ = event_tx.send(GameNetworkEvent::Message {
             connection: incoming_uuid.into(),
             stream: stream_id.into(),
-            data: payload
+            data: payload,
         });
     }
 }

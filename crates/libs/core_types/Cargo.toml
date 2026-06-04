@@ -1,0 +1,10 @@
+[package]
+name = "core_types"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "core_types"
+path = "src/math.rs"
+
+[dependencies]

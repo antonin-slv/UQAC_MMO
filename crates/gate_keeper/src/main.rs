@@ -7,7 +7,7 @@ use crate::database_manager::DatabaseManager;
 use crate::rocket_manager::RocketManager;
 use dotenv::dotenv;
 use std::sync::Arc;
-use shared_replication::redis_manager::RedisManager;
+use not_games::redis_manager::RedisManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

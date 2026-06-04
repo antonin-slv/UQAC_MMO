@@ -1,0 +1,14 @@
+[package]
+name = "broker_client"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "broker_client"
+path = "src/broker_client.rs"
+
+[dependencies]
+game_sockets = { workspace = true }
+bytes = { workspace = true }
+game_message = { workspace = true }
+broker_protocol = { workspace = true }

@@ -3,8 +3,8 @@ use rocket::http::Status;
 use rocket::response::content;
 use rocket::serde::{Deserialize, json::Json};
 use rocket::{Ignite, Rocket, State};
-use shared_replication::redis_manager::RedisManager;
-use shared_replication::{ServerInfo, Login, LoginResponse, Register};
+use not_games::redis_manager::RedisManager;
+use not_games::{ServerInfo, Login, LoginResponse, Register};
 use std::env;
 use std::sync::Arc;
 

@@ -1,5 +1,5 @@
 use crate::shard_manager::ShardManager;
-pub(crate) use shared_replication::math::{Rect, Vec2};
+pub(crate) use core_types::{Rect, Vec2};
 use std::env;
 use std::hash::{Hash, Hasher};
 

@@ -1,13 +1,14 @@
-﻿use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_topics::{
+﻿use broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use broker_protocol::broker_topics::{
     AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
 };
-use shared_replication::msg_game_payload::GameMessageHeaders;
+use game_message::GameMessageHeaders;
 
-use shared_replication::broker_message::NodeId;
-use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use shared_replication::msg_dgs::{GameChunk, SpawnClientMsg, TakeChunkMessage};
-use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use broker_protocol::broker_message::NodeId;
+use core_types::GameChunk;
+use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
+use game_message::msg_dgs::{SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use std::time::Duration;
 pub async fn run_spatial_auth_server() {

@@ -1,6 +1,10 @@
-﻿use bytes::{BufMut, Bytes, BytesMut};
-use crate::broker_message::{BrokerMessage};
-use crate::broker_topics::Topic;
+﻿use broker_protocol::broker_message::BrokerMessage;
+use broker_protocol::broker_topics::Topic;
+use bytes::{BufMut, Bytes, BytesMut};
+
+pub mod msg_dgs;
+pub mod msg_servers;
+pub mod msg_client_server;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,13 +89,11 @@ impl GamePayload {
             ))
         }
     }
-}
 
-impl BrokerMessage {
     pub fn write_publish_to<T: GameMessage>(
         buf: &mut BytesMut,
         topic: &Topic,
-        message: &T
+        message: &T,
     ) {
         BrokerMessage::write_publish_headers(buf, topic);
 
@@ -103,6 +105,6 @@ impl BrokerMessage {
 
         // 5. Calcul de la taille réelle et rétro-injection
         let payload_len = (buf.len() - payload_start) as u16;
-        buf[payload_start - 2 .. payload_start].copy_from_slice(&payload_len.to_le_bytes());
+        buf[payload_start - 2..payload_start].copy_from_slice(&payload_len.to_le_bytes());
     }
 }

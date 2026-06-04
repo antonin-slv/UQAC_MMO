@@ -1,5 +1,5 @@
-﻿use crate::broker_message::NodeId;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+﻿use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::PartialEq;
 

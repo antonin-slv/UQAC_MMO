@@ -1,12 +1,12 @@
-use crate::QuadTreeCommand;
 use crate::quadtree::Entity;
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
+use crate::QuadTreeCommand;
+use broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use broker_protocol::broker_topics::{
+    Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
 };
-use shared_replication::math::Vec2;
-use shared_replication::msg_game_payload::GameMessageHeaders;
-use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use core_types::Vec2;
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
+use game_message::GameMessageHeaders;
 use std::env;
 use tokio::sync::mpsc::Sender;
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -115,7 +115,8 @@ impl BrokerClient {
                         }
                         println!("[Orchestrator] Got ClientHello");
                     }
-                    GameMessageHeaders::ChunkHandOff => {
+                    GameMessageHeaders::ChunkHandOff
+                    => {
                         println!("[Orchestrator] Got ChunkHandOff");
                     }
                     _ => {}

@@ -1,4 +1,4 @@
-﻿use crate::msg_dgs::GameChunk;
+﻿use core_types::GameChunk;
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 

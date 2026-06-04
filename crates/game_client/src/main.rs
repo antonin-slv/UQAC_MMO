@@ -5,9 +5,8 @@ mod structs;
 use crate::launcher::LauncherPlugin;
 use crate::structs::{ClientState, LocalPlayer};
 use bevy::prelude::*;
-use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-
-use shared_replication::msg_client_server::*;
+use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use game_message::msg_client_server::{PlayerInput, PlayerInputMsg};
 
 #[derive(Bundle)]
 pub struct CameraBundle {
