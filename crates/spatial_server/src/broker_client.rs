@@ -3,7 +3,7 @@ use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::{GameChunk, Rect, Vec2};
+use core_types::{Rect, Vec2, get_chunk_size};
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
@@ -171,17 +171,12 @@ impl BrokerClient {
     ) {
         println!("[Orchestrator] On new client connected");
 
-        quad_tree.insert(
-            Entity::new(
-                client_id,
-                Vec2::new(
-                    rand::random_range(-300.0..300.0),
-                    rand::random_range(-300.0..300.0),
-                ),
-            ),
-            shard_manager,
-            self,
+        let new_entity_pos = Vec2::new(
+            rand::random_range(-300.0..300.0),
+            rand::random_range(-300.0..300.0),
         );
+
+        quad_tree.insert(Entity::new(client_id, new_entity_pos), shard_manager, self);
 
         println!(
             "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",
@@ -202,11 +197,15 @@ impl BrokerClient {
         self.broker_api.authorize_client(client_id);
 
         let shard = shard_manager.get_shard_bounds_for_client(client_id, quad_tree);
-        if let Some((dgs_id, bounds)) = shard {
-            let chunk = GameChunk {
-                x: bounds.min_x as i16,
-                y: bounds.min_y as i16,
-            };
+        if let Some((dgs_id, _)) = shard {
+            let world_size: f32 = env::var("WORLD_SIZE")
+                .expect("Env WORLD_SIZE is not set")
+                .parse()
+                .expect("Env WORLD_SIZE is not a number");
+            let max_depth = env::var("QUADTREE_MAX_DEPTH").unwrap().parse().unwrap();
+
+            let chunk_size = get_chunk_size(world_size, max_depth);
+            let chunk = new_entity_pos.get_chunk(chunk_size);
 
             let chunk_state =
                 TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
@@ -242,12 +241,7 @@ impl BrokerClient {
         }
     }
 
-    pub fn assign_shard_to_dgs(
-        &self,
-        dgs_id: NodeId,
-        areas: Vec<Rect>,
-        old_dgs_ids: Vec<NodeId>,
-    ) {
+    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<Rect>, old_dgs_ids: Vec<NodeId>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
@@ -261,12 +255,7 @@ impl BrokerClient {
         self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 
-    pub fn remove_shard_to_dgs(
-        &self,
-        dgs_id: NodeId,
-        areas: Vec<Rect>,
-        old_dgs_ids: Vec<NodeId>,
-    ) {
+    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<Rect>, old_dgs_ids: Vec<NodeId>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();

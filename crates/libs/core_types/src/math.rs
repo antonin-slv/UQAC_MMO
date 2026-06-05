@@ -14,6 +14,13 @@ impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+
+    pub fn get_chunk(&self, chunk_size: f32) -> GameChunk {
+        GameChunk {
+            x: (self.x / chunk_size).floor() as i16,
+            y: (self.y / chunk_size).floor() as i16,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
