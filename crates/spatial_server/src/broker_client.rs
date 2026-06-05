@@ -3,9 +3,9 @@ use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::{GameChunk, Vec2};
+use core_types::{GameChunk, Rect, Vec2};
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use game_message::msg_dgs::{ChunkHandOff, SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -180,6 +180,7 @@ impl BrokerClient {
                 ),
             ),
             shard_manager,
+            self,
         );
 
         println!(
@@ -241,18 +242,41 @@ impl BrokerClient {
         }
     }
 
-    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, chunk_hand_off: ChunkHandOff) {
+    pub fn assign_shard_to_dgs(
+        &self,
+        dgs_id: NodeId,
+        areas: Vec<Rect>,
+        old_dgs_ids: Vec<NodeId>,
+    ) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
 
-        let msg = TakeChunkMessage {
-            game_chunk: GameChunk {
-                x: chunk_hand_off.areas.len() as i16,
-                y: chunk_hand_off.areas.len() as i16,
-            },
+        let chunk_hand_off = ChunkHandOff {
+            action: ChunkHandOffAction::ReleaseArea,
+            areas,
+            old_dgs_ids,
         };
 
-        self.broker_api.publish_reliable(topic, &msg);
+        self.broker_api.publish_reliable(topic, &chunk_hand_off);
+    }
+
+    pub fn remove_shard_to_dgs(
+        &self,
+        dgs_id: NodeId,
+        areas: Vec<Rect>,
+        old_dgs_ids: Vec<NodeId>,
+    ) {
+        let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+            .append_id(dgs_id)
+            .build();
+
+        let chunk_hand_off = ChunkHandOff {
+            action: ChunkHandOffAction::ReleaseArea,
+            areas,
+            old_dgs_ids,
+        };
+
+        self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 }

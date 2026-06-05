@@ -62,4 +62,27 @@ impl Rect {
             },
         ]
     }
+
+    pub fn get_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
+        let start_x = (self.min_x / chunk_size).floor() as i16;
+        let end_x = (self.max_x / chunk_size).floor() as i16;
+
+        let start_y = (self.min_y / chunk_size).floor() as i16;
+        let end_y = (self.max_y / chunk_size).floor() as i16;
+
+        let total_chunks = ((end_x - start_x + 1) * (end_y - start_y + 1)) as usize;
+        let mut chunks = Vec::with_capacity(total_chunks);
+
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                chunks.push(GameChunk { x, y });
+            }
+        }
+        chunks
+    }
+}
+
+pub fn get_chunk_size(world_size: f32, max_division: u8) -> f32 {
+    let num_division = 2 << max_division;
+    world_size / (num_division as f32)
 }

@@ -1,8 +1,9 @@
+use crate::broker_client::BrokerClient;
 use crate::shard_manager::ShardManager;
-use std::env;
-use std::hash::{Hash, Hasher};
 use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
+use std::env;
+use std::hash::{Hash, Hasher};
 
 pub type ShardId = u32;
 
@@ -31,7 +32,7 @@ impl Hash for Entity {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct QuadTree {
     pub bounds: Rect,
     pub depth: u8,
@@ -43,7 +44,7 @@ pub struct QuadTree {
 }
 
 impl QuadTree {
-    pub fn new(shard_manager: &mut ShardManager) -> Self {
+    pub fn new(shard_manager: &mut ShardManager, broker: &BrokerClient) -> Self {
         let mut world_size: f32 = env::var("WORLD_SIZE")
             .expect("Env WORLD_SIZE is not set")
             .parse()
@@ -69,7 +70,8 @@ impl QuadTree {
             0,
         );
 
-        quadtree.subdivide(shard_manager);
+        quadtree.subdivide(shard_manager, broker);
+
         quadtree
     }
 
@@ -92,14 +94,19 @@ impl QuadTree {
         }
     }
 
-    pub fn insert(&mut self, entity: Entity, shard_manager: &mut ShardManager) -> bool {
+    pub fn insert(
+        &mut self,
+        entity: Entity,
+        shard_manager: &mut ShardManager,
+        broker: &BrokerClient,
+    ) -> bool {
         if !self.bounds.contains(entity.pos) {
             return false;
         }
 
         if let Some(children) = &mut self.children {
             for child in children.iter_mut() {
-                if child.insert(entity, shard_manager) {
+                if child.insert(entity, shard_manager, broker) {
                     return true;
                 }
             }
@@ -111,71 +118,70 @@ impl QuadTree {
         if shard_manager.count_entity_in_shard(self.shard_id) > self.subdivide_threshold
             && self.depth < self.max_depth
         {
-            self.subdivide(shard_manager);
+            self.subdivide(shard_manager, broker);
         }
 
         true
     }
 
-    fn subdivide(&mut self, shard_manager: &mut ShardManager) {
-        let sub_bounds = self.bounds.split();
-        let shard_ids = self.generate_shard_id();
+    fn subdivide(&mut self, shard_manager: &mut ShardManager, broker: &BrokerClient) {
+        let sub_shards = self.generate_sub_shards();
 
         let mut children = Box::new([
             QuadTree::new_internal(
-                sub_bounds[0],
+                sub_shards[0].1,
                 self.depth + 1,
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids[0],
+                sub_shards[0].0,
             ),
             QuadTree::new_internal(
-                sub_bounds[1],
+                sub_shards[1].1,
                 self.depth + 1,
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids[1],
+                sub_shards[1].0,
             ),
             QuadTree::new_internal(
-                sub_bounds[2],
+                sub_shards[2].1,
                 self.depth + 1,
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids[2],
+                sub_shards[2].0,
             ),
             QuadTree::new_internal(
-                sub_bounds[3],
+                sub_shards[3].1,
                 self.depth + 1,
                 self.max_depth,
                 self.subdivide_threshold,
                 self.merge_threshold,
-                shard_ids[3],
+                sub_shards[3].0,
             ),
         ]);
 
         for entity in shard_manager.drain_entities(self.shard_id) {
             for child in children.iter_mut() {
-                if child.insert(entity, shard_manager) {
+                if child.insert(entity, shard_manager, broker) {
                     break;
                 }
             }
         }
 
-        shard_manager.on_new_shard(shard_ids);
+        shard_manager.on_new_shard(Some(self.shard_id), sub_shards, broker);
         self.children = Some(children);
     }
 
-    pub fn try_merge(&mut self, shard_manager: &mut ShardManager) {
+    pub fn try_merge(&mut self, shard_manager: &mut ShardManager, broker: &BrokerClient) {
         let entity_count = self.count_entities(shard_manager);
         if let Some(children) = self.children.as_mut() {
-            if entity_count < self.merge_threshold {
-                self.merge(shard_manager);
+            if entity_count < self.merge_threshold && self.depth > 0 {
+                self.merge(shard_manager, broker);
             } else {
                 for child in children.iter_mut() {
-                    child.try_merge(shard_manager);
+                    child.try_merge(shard_manager, broker);
                 }
             }
         }
@@ -191,28 +197,33 @@ impl QuadTree {
         count
     }
 
-    fn merge(&mut self, shard_manager: &mut ShardManager) {
+    fn merge(&mut self, shard_manager: &mut ShardManager, broker: &BrokerClient) {
         if let Some(children) = self.children.as_mut() {
-            let mut destroyed_shards: Vec<ShardId> = Vec::new();
+            let mut destroyed_shards: Vec<(ShardId, Rect)> = Vec::new();
             for child in children.iter_mut() {
                 for entity in shard_manager.drain_entities(child.shard_id).iter() {
                     shard_manager.set_entity_shard(self.shard_id, entity.clone());
                 }
-                destroyed_shards.push(child.shard_id)
+                destroyed_shards.push((child.shard_id, child.bounds));
             }
-            shard_manager.on_shard_destroyed(destroyed_shards);
+            shard_manager.on_shard_destroyed(
+                (self.shard_id, self.bounds),
+                destroyed_shards,
+                broker,
+            );
             self.children = None;
         }
     }
 
-    fn generate_shard_id(&mut self) -> Vec<ShardId> {
-        let mut shard_ids: Vec<ShardId> = Vec::new();
+    fn generate_sub_shards(&mut self) -> Vec<(ShardId, Rect)> {
+        let sub_bounds = self.bounds.split();
+        let mut shard_ids = Vec::new();
         let offset = self.depth * 2;
         for i in 0..4 {
             let mut child_id = i;
             child_id = child_id << offset;
             child_id |= self.shard_id;
-            shard_ids.push(child_id);
+            shard_ids.push((child_id, sub_bounds[i as usize]));
         }
         shard_ids
     }

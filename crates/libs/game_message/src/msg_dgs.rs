@@ -9,13 +9,13 @@ pub struct TakeChunkMessage {
     pub game_chunk: GameChunk,
 }
 
-pub enum ChunkHandOffType {
-    TookAreaReady,
-    ReleasedArea,
-    ChunkStolen,
+pub enum ChunkHandOffAction {
+    TakeArea,
+    AreaTook,
+    ReleaseArea,
 }
 
-impl NetWrite for ChunkHandOffType {
+impl NetWrite for ChunkHandOffAction {
     fn serialize(&self) -> Bytes {
         let mut buf = BytesMut::new();
         self.write_to(&mut buf);
@@ -23,39 +23,44 @@ impl NetWrite for ChunkHandOffType {
     }
 }
 
-impl NetWriteTo for ChunkHandOffType {
+impl NetWriteTo for ChunkHandOffAction {
     fn write_to(&self, buf: &mut BytesMut) {
         buf.put_u8(match self {
-            ChunkHandOffType::TookAreaReady => 0u8,
-            ChunkHandOffType::ReleasedArea => 1u8,
-            ChunkHandOffType::ChunkStolen => 2u8,
+            ChunkHandOffAction::TakeArea => 0u8,
+            ChunkHandOffAction::AreaTook => 1u8,
+            ChunkHandOffAction::ReleaseArea => 2u8,
         });
     }
 }
 
-impl NetRead for ChunkHandOffType {
+impl NetRead for ChunkHandOffAction {
     fn deserialize(buf: &mut Bytes) -> Result<Self, String> {
         let data = buf.get_u8();
         match data {
-            0 => Ok(ChunkHandOffType::TookAreaReady),
-            1 => Ok(ChunkHandOffType::ReleasedArea),
-            2 => Ok(ChunkHandOffType::ChunkStolen),
+            0 => Ok(ChunkHandOffAction::TakeArea),
+            1 => Ok(ChunkHandOffAction::AreaTook),
+            2 => Ok(ChunkHandOffAction::ReleaseArea),
             _ => Err(format!("Unknown chunk handoff type {}", data)),
         }
     }
 }
 
 pub struct ChunkHandOff {
-    pub hand_off_type: ChunkHandOffType,
+    pub action: ChunkHandOffAction,
+    pub old_dgs_ids: Vec<NodeId>,
     pub areas: Vec<Rect>,
 }
 
 impl NetWriteTo for ChunkHandOff {
     fn write_to(&self, buf: &mut BytesMut) {
-        self.hand_off_type.write_to(buf);
+        self.action.write_to(buf);
         buf.put_u8(self.areas.len() as u8);
-        for area in &self.areas {
-            area.write_to(buf);
+        buf.put_u8(self.old_dgs_ids.len() as u8);
+        for id in self.old_dgs_ids.iter() {
+            buf.put_u32_le(*id);
+        }
+        for chunk in &self.areas {
+            chunk.write_to(buf);
         }
     }
 }
@@ -76,8 +81,14 @@ impl NetWrite for ChunkHandOff {
 
 impl NetRead for ChunkHandOff {
     fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        match ChunkHandOffType::deserialize(data) {
-            Ok(hand_off_type) => {
+        match ChunkHandOffAction::deserialize(data) {
+            Ok(action) => {
+                let old_dgs_id_len = data.get_u8();
+                let mut old_dgs_ids = vec![];
+                for _ in 0..old_dgs_id_len {
+                    old_dgs_ids.push(data.get_u32_le());
+                }
+
                 let areas_len = data.get_u8() as usize;
                 let mut areas = Vec::with_capacity(areas_len);
                 for _ in 0..areas_len {
@@ -91,8 +102,9 @@ impl NetRead for ChunkHandOff {
                 }
 
                 Ok(Self {
-                    hand_off_type,
+                    action,
                     areas,
+                    old_dgs_ids,
                 })
             }
             Err(e) => Err(format!("ChunkHandOffType : {}", e)),

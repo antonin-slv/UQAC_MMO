@@ -32,8 +32,8 @@ async fn main() -> Result<()> {
 
     let quad_tree_handle = tokio::spawn(async move {
         let mut shard_manager = ShardManager::new();
-        let mut quad_tree = QuadTree::new(&mut shard_manager);
         let mut broker_client = BrokerClient::new();
+        let mut quad_tree = QuadTree::new(&mut shard_manager, &broker_client);
 
         println!("[Acteur QuadTree] Initialisé et à l'écoute...");
 
@@ -41,13 +41,20 @@ async fn main() -> Result<()> {
             while let Ok(command) = quadtree_rx.try_recv() {
                 match command {
                     QuadTreeCommand::MoveEntity(entity) => {
-                        quad_tree.insert(entity, &mut shard_manager);
+                        quad_tree.insert(entity, &mut shard_manager, &broker_client);
 
                         #[cfg(feature = "debug_visual")]
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
                     }
                     QuadTreeCommand::TryMerge => {
-                        quad_tree.try_merge(&mut shard_manager);
+                        quad_tree.try_merge(&mut shard_manager, &broker_client);
+                        println!("======================================");
+                        println!("Active DGS : {:?}", shard_manager.active_dgs);
+                        println!("Shards without DGS : {:?}", shard_manager.shard_without_dgs);
+                        println!(
+                            "DGS without shards : {:?}",
+                            shard_manager.dgs_without_shards
+                        );
 
                         #[cfg(feature = "debug_visual")]
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
