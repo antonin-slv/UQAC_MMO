@@ -1,8 +1,8 @@
 use crate::shard_manager::ShardManager;
-use shared_replication::broker_message::NodeId;
-pub(crate) use shared_replication::math::{Rect, Vec2};
 use std::env;
 use std::hash::{Hash, Hasher};
+use broker_protocol::broker_message::NodeId;
+use core_types::{Rect, Vec2};
 
 pub type ShardId = u32;
 

@@ -1,13 +1,13 @@
 use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_message::NodeId;
-use shared_replication::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use shared_replication::math::Vec2;
-use shared_replication::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use shared_replication::msg_dgs::{ChunkHandOff, GameChunk, SpawnClientMsg, TakeChunkMessage};
-use shared_replication::msg_game_payload::{GameMessageHeaders, GamePayload};
-use shared_replication::msg_servers::{ServerHelloMSG, ServerType};
+use broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use broker_protocol::broker_message::NodeId;
+use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::{GameChunk, Vec2};
+use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
+use game_message::msg_dgs::{ChunkHandOff, SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
+use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";

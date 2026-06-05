@@ -1,7 +1,8 @@
-use crate::broker_message::NodeId;
-use crate::math::Rect;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use core_types::{GameChunk, Rect};
+use rocket::serde::json::serde_json;
 use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
@@ -125,31 +126,6 @@ impl NetRead for TakeChunkMessage {
             Ok(game_chunk) => Ok(Self { game_chunk }),
             Err(e) => Err(format!("TakeChunkMessage : {}", e)),
         }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GameChunk {
-    pub x: i16,
-    pub y: i16,
-}
-
-impl NetWriteTo for GameChunk {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_i16_le(self.x);
-        buf.put_i16_le(self.y);
-    }
-}
-
-impl NetRead for GameChunk {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        if data.remaining() < 4 {
-            return Err("GameChunk: buffer trop court".into());
-        }
-        Ok(Self {
-            x: data.get_i16_le(),
-            y: data.get_i16_le(),
-        })
     }
 }
 

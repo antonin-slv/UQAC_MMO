@@ -1,6 +1,3 @@
-use crate::msg_game_payload::{NetRead, NetWrite, NetWriteTo};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
@@ -25,36 +22,6 @@ pub struct Rect {
     pub min_y: f32,
     pub max_x: f32,
     pub max_y: f32,
-}
-
-impl NetWriteTo for Rect {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_f32(self.min_x);
-        buf.put_f32(self.min_y);
-        buf.put_f32(self.max_x);
-        buf.put_f32(self.max_y);
-    }
-}
-
-impl NetWrite for Rect {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(16);
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for Rect {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        let rect = Self {
-            min_x: data.get_f32(),
-            min_y: data.get_f32(),
-            max_x: data.get_f32(),
-            max_y: data.get_f32(),
-        };
-
-        Ok(rect)
-    }
 }
 
 pub type OwnedArea = (u32, Vec<Rect>);

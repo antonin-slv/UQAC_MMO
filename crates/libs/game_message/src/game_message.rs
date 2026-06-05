@@ -5,6 +5,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 pub mod msg_dgs;
 pub mod msg_servers;
 pub mod msg_client_server;
+pub mod core_types;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]

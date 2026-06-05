@@ -1,7 +1,7 @@
 use crate::quadtree::{Entity, QuadTree, ShardId};
-use shared_replication::broker_message::NodeId;
-use shared_replication::math::Rect;
 use std::collections::{HashMap, HashSet, VecDeque};
+use broker_protocol::broker_message::NodeId;
+use core_types::{Rect, Vec2};
 
 #[derive(Clone)]
 pub struct ShardManager {
@@ -61,7 +61,7 @@ impl ShardManager {
         if let Some(shard) = self.shards.get_mut(&shard_id) {
             shard.remove(&Entity::new(
                 entity_id,
-                shared_replication::math::Vec2::new(0.0, 0.0),
+                Vec2::new(0.0, 0.0),
             ));
         }
     }
