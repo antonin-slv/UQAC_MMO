@@ -6,16 +6,22 @@ edition = "2024"
 [dependencies]
 # Héritées du workspace
 dotenv = { workspace = true }
-shared_replication = { workspace = true }
 uuid = { workspace = true }
 
 # Surcharge spécifique au serveur
 bevy = { version = "0.18.1", default-features = false }
 #bevy_rapier2d = {version = "0.33.0" }
 
+broker_client = { workspace = true }
+game_message = { workspace = true }
+broker_protocol = { workspace = true }
+core_types = { workspace = true }
+
+
+
+
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
-

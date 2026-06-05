@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 # Héritées du workspace
-shared_replication = { workspace = true }
 bevy = { workspace = true }
 tokio = { workspace = true, features = ["rt", "net", "time"] }
 
@@ -13,3 +12,9 @@ tokio = { workspace = true, features = ["rt", "net", "time"] }
 bevy_egui = "0.39.1"
 reqwest = { version = "0.12", features = ["json"] }
 futures-lite = "2.6.1"
+
+broker_client = { workspace = true }
+game_message = { workspace = true }
+broker_protocol = { workspace = true }
+core_types = { workspace = true }
+not_games = { workspace = true }

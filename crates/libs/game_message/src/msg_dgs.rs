@@ -1,4 +1,4 @@
-﻿use crate::broker_message::NodeId;
+use crate::broker_message::NodeId;
 use crate::math::Rect;
 use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bytes::{Buf, BufMut, Bytes, BytesMut};

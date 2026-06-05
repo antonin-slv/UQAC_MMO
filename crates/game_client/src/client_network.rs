@@ -5,13 +5,12 @@ use bevy::asset::Assets;
 use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
-use shared_replication::broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use shared_replication::broker_topics::{
+use broker_client::{ClientNetworkEvent, MmoNetworkClient};
+use broker_protocol::broker_topics::{
     AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, SecurityDomain, TopicBuilder,
 };
-use shared_replication::msg_game_payload::GameMessageHeaders;
-
-use shared_replication::msg_client_server::*;
+use game_message::GameMessageHeaders;
+use game_message::msg_client_server::*;
 #[derive(Component)]
 struct NetworkEntity(u32);
 

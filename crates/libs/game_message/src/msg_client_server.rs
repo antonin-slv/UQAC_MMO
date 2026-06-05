@@ -1,10 +1,10 @@
 ﻿// -- les différents streams de données
 
-use crate::broker_message::NodeId;
-use crate::msg_dgs::GameChunk;
-use crate::msg_game_payload::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bincode::Options;
+use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use core_types::GameChunk;
 use rocket::serde::{Deserialize, Serialize};
 
 //

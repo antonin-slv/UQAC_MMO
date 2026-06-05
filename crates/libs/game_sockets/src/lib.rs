@@ -1,7 +1,7 @@
 pub mod protocols;
 
-use std::thread;
 use bytes::Bytes;
+use std::thread;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -23,12 +23,12 @@ pub trait GameSocketBackend: Send + 'static {
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct GameConnection {
-    pub connection_uuid: uuid::Uuid
+    pub connection_uuid: uuid::Uuid,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct GameStream {
-    pub stream_id: u16
+    pub stream_id: u16,
 }
 
 const RELIABILITY_MASK: u16 = 0b11;
@@ -36,7 +36,6 @@ const ORDERING_MASK: u16 = 0b10;
 
 impl GameStream {
     pub fn new(stream_id: u16, game_stream_reliability: GameStreamReliability) -> Self {
-
         let mut stream_id = stream_id << 2;
         if game_stream_reliability == GameStreamReliability::Ordered {
             stream_id |= ORDERING_MASK;
@@ -59,7 +58,7 @@ impl GameStream {
         //Check second last bit of stream_id
         self.stream_id & ORDERING_MASK != 0
     }
-    
+
     pub fn real_stream_id(&self) -> u16 {
         self.stream_id >> 2
     }
@@ -77,27 +76,27 @@ pub enum GameSocketError {
     #[error("Generic error from protocol : {inner_msg}.")]
     ProtocolError { inner_msg: String },
     #[error("Error initializing protocol : {inner_msg}.")]
-    InitError { inner_msg: String},
+    InitError { inner_msg: String },
     #[error("Error connecting to remote host.")]
     ConnectionError,
     #[error("Unable to bind socket.")]
     BindError(#[from] std::io::Error),
     #[error("Error sending a packet : {inner_msg}.")]
-    SendFailed{ inner_msg: String}
+    SendFailed { inner_msg: String },
 }
 
 #[derive(Debug)]
 pub enum GameNetworkEvent {
     Connected(GameConnection),
     Disconnected(GameConnection),
-    Message{
+    Message {
         connection: GameConnection,
         stream: GameStream,
-        data: bytes::Bytes
+        data: bytes::Bytes,
     },
     Error {
         connection: GameConnection,
-        inner: GameSocketError
+        inner: GameSocketError,
     },
     StreamCreated(GameConnection, GameStream),
     StreamClosed(GameConnection, GameStream),
@@ -165,7 +164,7 @@ impl GamePeer {
         self.send_cmd(BackendCommand::CreateStream {
             connection: conn.connection_uuid,
             stream: stream_id, //modifs
-            reliability
+            reliability,
         })
     }
 

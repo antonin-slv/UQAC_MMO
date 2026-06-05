@@ -58,7 +58,7 @@ impl RedisManager {
             ExpireOption::NONE,
             server.id.as_str(),
         )
-        .await?;
+            .await?;
 
         Ok(())
     }

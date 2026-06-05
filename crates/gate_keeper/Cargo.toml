@@ -7,8 +7,10 @@ edition = "2024"
 anyhow = { workspace = true }
 dotenv = { workspace = true }
 rocket = { workspace = true }
-shared_replication = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 # Spécifiques au Gatekeeper
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "macros"] }
+
+
+not_games = { workspace = true }

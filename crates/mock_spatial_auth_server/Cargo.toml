@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-shared_replication = { workspace = true }
 dotenv = { workspace = true }
 tokio = { workspace = true }
+
+broker_client = { workspace = true }
+game_message = { workspace = true }
+broker_protocol = { workspace = true }
+core_types = { workspace = true }

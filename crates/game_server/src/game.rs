@@ -3,8 +3,8 @@ pub(crate) use crate::dgs_network::{ControlledBy, NetworkId, NetworkIdGenerator}
 use crate::events;
 use crate::events::AssignedChunks;
 use bevy::prelude::*;
-use shared_replication::broker_topics::SecurityDomain::PrivateReadPublicWrite;
-use shared_replication::broker_topics::{Namespace, TopicBuilder};
+use broker_protocol::broker_topics::SecurityDomain::PrivateReadPublicWrite;
+use broker_protocol::broker_topics::{Namespace, TopicBuilder};
 use std::collections::HashMap;
 
 #[derive(Resource, Default)]

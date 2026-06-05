@@ -1,14 +1,13 @@
 use bevy::prelude::*;
-use shared_replication::broker_message::NodeId;
-use shared_replication::msg_client_server;
-pub(crate) use shared_replication::msg_dgs::GameChunk;
+use broker_protocol::broker_message::NodeId;
+use core_types::GameChunk;
+use game_message::msg_client_server;
 
 #[derive(Message, Debug)]
 pub struct PlayerConnected {
     pub client_id: NodeId,
-    pub player_name: String
+    pub player_name: String,
 }
-
 
 #[derive(Message, Debug)]
 pub struct PlayerDisconnected {
@@ -22,9 +21,9 @@ pub struct PlayerInputEvent {
 }
 #[derive(Resource, Debug)]
 pub struct AssignedChunks {
-    pub chunk : Option<GameChunk>,
+    pub chunk: Option<GameChunk>,
 }
 #[derive(Message, Debug)]
 pub struct ChunkAssignedEvent {
-    pub chunk : GameChunk
+    pub chunk: GameChunk,
 }

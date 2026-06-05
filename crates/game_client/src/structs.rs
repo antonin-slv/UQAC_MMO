@@ -1,6 +1,6 @@
 ﻿use bevy::prelude::{States, Resource};
-use shared_replication::broker_message::NodeId;
-use shared_replication::msg_dgs::GameChunk;
+use broker_protocol::broker_message::NodeId;
+use core_types::GameChunk;
 
 // Les états de notre client
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
