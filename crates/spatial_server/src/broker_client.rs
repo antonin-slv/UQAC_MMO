@@ -104,8 +104,17 @@ impl BrokerClient {
                 ClientNetworkEvent::Connected => {
                     println!("[Server] Connecté au Broker (Still not ready)...");
                 }
-                ClientNetworkEvent::Disconnected => {
-                    panic!("Disconnected from broker (this is bad)");
+                ClientNetworkEvent::Disconnected(removed_node_id) => {
+                    match self.broker_api.node_id {
+                        Some(node_id) => {
+                            if node_id == removed_node_id {
+                                panic!("Disconnected from broker (this is bad)");
+                            }
+                        }
+                        None => {
+                            panic!("Disconnected from broker (this is bad)");
+                        }
+                    }
                 }
                 ClientNetworkEvent::DataReceived {
                     client_id,

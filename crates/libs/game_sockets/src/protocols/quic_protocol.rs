@@ -265,6 +265,9 @@ impl GameSocketBackend for QuicBackend {
                                 // On retire la connexion de la HashMap locale
                                 if let Some(conn) = self.connections.remove(&connection) {
                                     // On demande à Quinn de fermer proprement la socket avec le code d'erreur 0
+                                    
+                                    self.reliable_send_streams.retain(|(uuid, _), _| uuid != &connection);
+                                    self.unreliable_send_streams.retain(|x| x.0 != connection);
                                     conn.close(0u32.into(), b"Kicked by Server");
                                 }
                             },

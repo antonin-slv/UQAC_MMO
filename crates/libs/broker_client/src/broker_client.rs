@@ -10,7 +10,8 @@ use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream, GameS
 pub enum ClientNetworkEvent {
     Connected,
     Ready,
-    Disconnected,
+    Disconnected(NodeId),
+
     /// Les données brutes reçues
     DataReceived {
         client_id: NodeId,
@@ -82,13 +83,13 @@ impl MmoNetworkClient {
                     self.connection = None;
                     self.is_ready = false;
                     self.node_id = None; // On efface l'ID
-                    return Some(ClientNetworkEvent::Disconnected);
+                    return Some(ClientNetworkEvent::Disconnected(0));
                 }
 
                 Ok(Some(GameNetworkEvent::Message { stream, data, .. })) => {
                     match BrokerMessage::deserialize(data) {
                         // NOUVEAU : Interception du message Welcome
-                        Ok(BrokerMessage::Welcome { node_id }) => {
+                        Ok(BrokerMessage::Welcome(node_id)) => {
                             if !self.is_ready {
                                 self.node_id = Some(node_id);
                                 self.is_ready = true;
@@ -119,9 +120,9 @@ impl MmoNetworkClient {
                         }
 
                         Ok(BrokerMessage::BroadCastFrom {
-                               client_id,
-                               mut payload,
-                           }) => {
+                            client_id,
+                            mut payload,
+                        }) => {
                             if payload.is_empty() {
                                 continue;
                             }
@@ -138,11 +139,16 @@ impl MmoNetworkClient {
                             });
                         }
 
+                        Ok(BrokerMessage::NodeDisconnected(node_id)) => {
+                            return Some(ClientNetworkEvent::Disconnected(node_id));
+                        }
                         Err(e) => {
                             eprintln!("[BrokerClient] Erreur de parsing du message: {}", e);
                             continue;
                         }
-                        _ => continue,
+                        _ => {
+                            continue;
+                        }
                     }
                 }
 
@@ -160,7 +166,7 @@ impl MmoNetworkClient {
                             self.connection = None;
                             self.is_ready = false;
                             self.node_id = None;
-                            return Some(ClientNetworkEvent::Disconnected);
+                            return Some(ClientNetworkEvent::Disconnected(0));
                         }
                         _ => {
                             eprintln!("[BrokerClient] GameSocket error 1 : {:}", error);
@@ -175,7 +181,7 @@ impl MmoNetworkClient {
                         self.connection = None;
                         self.is_ready = false;
                         self.node_id = None;
-                        return Some(ClientNetworkEvent::Disconnected);
+                        return Some(ClientNetworkEvent::Disconnected(0));
                     }
                     _ => {
                         eprintln!("[BrokerClient] GameSocket error 2 : {:}", e);
@@ -189,16 +195,12 @@ impl MmoNetworkClient {
     // --- COMMANDES D'ADMINISTRATION ---
 
     pub fn authorize_client(&self, target_client: NodeId) {
-        let msg = BrokerMessage::AuthorizeClient {
-            client_id: target_client,
-        };
+        let msg = BrokerMessage::AuthorizeClient(target_client);
         self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 
     pub fn kick_client(&self, target_client: NodeId) {
-        let msg = BrokerMessage::KickNode {
-            client_id: target_client,
-        };
+        let msg = BrokerMessage::KickNode(target_client);
         self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 

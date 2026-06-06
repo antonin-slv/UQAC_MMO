@@ -57,14 +57,20 @@ pub async fn run_spatial_auth_server() {
                 ClientNetworkEvent::Connected => {
                     println!("🌍 [Spatial/Auth] Connecté au Broker (Still not ready)...");
                 }
-                ClientNetworkEvent::Disconnected => {
-                    println!(
-                        "❌ [Spatial/Auth] Perte de connexion au Broker ! Tentative de reconnexion dans 1s..."
-                    );
-                    //sleeps for 1 seconds
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                ClientNetworkEvent::Disconnected(nodeID) => {
+                    if nodeID == 0 || nodeID == broker_api.node_id.unwrap_or(nodeID) {
+                        println!(
+                            "❌ [Spatial/Auth] Perte de connexion au Broker ! Tentative de reconnexion dans 1s..."
+                        );
+                        //sleeps for 1 seconds
+                        tokio::time::sleep(Duration::from_secs(1)).await;
 
-                    let _ = broker_api.connect(host_adress.as_ref(), broker_private_port);
+                        let _ = broker_api.connect(host_adress.as_ref(), broker_private_port);
+                    } else if let Some(removed_dgs) =  active_dgs.iter().position(|&id| id == nodeID) {
+                        println!("🗺️ [Spatial] DGS déconnecté : {}", nodeID);
+                        active_dgs.remove(removed_dgs);
+                    }
+
                 }
                 ClientNetworkEvent::DataReceived {
                     client_id,

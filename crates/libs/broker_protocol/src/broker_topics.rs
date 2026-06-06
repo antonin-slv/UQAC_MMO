@@ -36,7 +36,7 @@ pub enum Namespace {
     ClientAuth = 0x05,       // client to server auth
     Chunk = 0x06,            // event linked to a specifi chunk + localisation
     SpatialInput = 0x11,     // Réception des inputs (lié à un chunk)
-    SpatialServer = 0x12,     // Réception des inputs (lié à un chunk)
+    SpatialServer = 0x12,    // Réception des inputs (lié à un chunk)
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 
@@ -75,7 +75,7 @@ pub trait TopicDefaults {
 }
 impl TopicDefaults for Topic {
     fn default_topic() -> Self {
-        [0u8; 16] // Plus besoin de Bytes::from_static
+        [0u8; 16]
     }
     fn topic_length() -> usize {
         TOPIC_LENGTH as usize

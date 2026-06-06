@@ -247,8 +247,10 @@ fn network_bridge_system(
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
             }
-            ClientNetworkEvent::Disconnected => {
-                panic!("Disconnected from broker (this is bad)");
+            ClientNetworkEvent::Disconnected(DiscoID) => {
+                if DiscoID == server_info.server_broker_id || DiscoID == 0 {
+                    panic!("Disconnected from broker (this is bad)");
+                }
             }
 
             ClientNetworkEvent::DataReceived {
