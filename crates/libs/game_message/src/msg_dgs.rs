@@ -1,7 +1,8 @@
 use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::{GameChunk, Rect};
+use core_types::{Rect};
+use core_types::chunks::GameChunk;
 use rocket::serde::json::serde_json;
 use rocket::serde::{Deserialize, Serialize};
 

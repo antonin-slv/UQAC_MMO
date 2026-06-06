@@ -4,7 +4,7 @@ use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bincode::Options;
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::GameChunk;
+use core_types::chunks::GameChunk;
 use rocket::serde::{Deserialize, Serialize};
 
 //

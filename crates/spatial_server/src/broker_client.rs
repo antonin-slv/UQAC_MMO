@@ -2,13 +2,14 @@ use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::{Rect, Vec2, get_chunk_size};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::{Rect, Vec2};
 use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
 use std::env;
+use core_types::chunks::get_chunk_size;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
@@ -104,8 +105,17 @@ impl BrokerClient {
                 ClientNetworkEvent::Connected => {
                     println!("[Server] Connecté au Broker (Still not ready)...");
                 }
-                ClientNetworkEvent::Disconnected => {
-                    panic!("Disconnected from broker (this is bad)");
+                ClientNetworkEvent::Disconnected(removed_node_id) => {
+                    match self.broker_api.node_id {
+                        Some(node_id) => {
+                            if node_id == removed_node_id {
+                                panic!("Disconnected from broker (this is bad)");
+                            }
+                        }
+                        None => {
+                            panic!("Disconnected from broker (this is bad)");
+                        }
+                    }
                 }
                 ClientNetworkEvent::DataReceived {
                     client_id,

@@ -1,6 +1,7 @@
-﻿use crate::broker_topics::{Topic, TopicDefaults};
+﻿use crate::topics::{Topic, TopicDefaults};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt;
+use crate::topic_patterns::TopicPattern;
 
 pub const RELIABLE_STREAM_ID: u16 = 0;
 
@@ -41,12 +42,15 @@ impl std::error::Error for ProtocolError {}
 pub enum ProtocolTag {
     Subscribe = 0x01,
     Unsubscribe = 0x02,
-    Publish = 0x03,
-    Broadcast = 0x04,
-    BroadcastFromClient = 0x05,
-    AuthorizeClient = 0x06,
-    KickClient = 0x07,
-    Welcome = 0x08,
+    BatchSubscribe = 0x03,
+    BatchUnsubscribe = 0x04,
+    Publish = 0x5,
+    Broadcast = 0x06,
+    BroadcastFromClient = 0x07,
+    AuthorizeClient = 0x08,
+    KickClient = 0x09,
+    Welcome = 0x10,
+    NodeDisconnected = 0x11,
 }
 
 impl TryFrom<u8> for ProtocolTag {
@@ -56,12 +60,15 @@ impl TryFrom<u8> for ProtocolTag {
         match value {
             0x01 => Ok(Self::Subscribe),
             0x02 => Ok(Self::Unsubscribe),
-            0x03 => Ok(Self::Publish),
-            0x04 => Ok(Self::Broadcast),
-            0x05 => Ok(Self::BroadcastFromClient),
-            0x06 => Ok(Self::AuthorizeClient),
-            0x07 => Ok(Self::KickClient),
-            0x08 => Ok(Self::Welcome),
+            0x03 => Ok(Self::BatchSubscribe),
+            0x04 => Ok(Self::BatchUnsubscribe),
+            0x05 => Ok(Self::Publish),
+            0x06 => Ok(Self::Broadcast),
+            0x07 => Ok(Self::BroadcastFromClient),
+            0x08 => Ok(Self::AuthorizeClient),
+            0x09 => Ok(Self::KickClient),
+            0x10 => Ok(Self::Welcome),
+            0x11 => Ok(Self::NodeDisconnected),
 
             _ => Err(ProtocolError::UnknownTag(value)),
         }
@@ -96,14 +103,39 @@ impl NodeIdMetaData for NodeId {
 
 #[derive(Debug, Clone)]
 pub enum BrokerMessage {
-    Subscribe { client_id: NodeId, topic: Topic },
-    Unsubscribe { client_id: NodeId, topic: Topic },
-    Publish { topic: Topic, payload: Bytes },
-    Broadcast { payload: Bytes },
-    BroadCastFrom { client_id: NodeId, payload: Bytes },
-    AuthorizeClient { client_id: NodeId },
-    KickNode { client_id: NodeId },
-    Welcome { node_id: NodeId },
+    Subscribe {
+        client_id: NodeId,
+        topic: Topic,
+    },
+    Unsubscribe {
+        client_id: NodeId,
+        topic: Topic,
+    },
+    BatchSubscribe {
+        client_id: NodeId,
+        pattern: TopicPattern,
+    },
+    BatchUnsubscribe {
+        client_id: NodeId,
+        pattern: TopicPattern,
+    },
+
+    Publish {
+        topic: Topic,
+        payload: Bytes,
+    },
+    Broadcast {
+        payload: Bytes,
+    },
+    BroadCastFrom {
+        client_id: NodeId,
+        payload: Bytes,
+    },
+
+    AuthorizeClient(NodeId),
+    KickNode(NodeId),
+    Welcome(NodeId),
+    NodeDisconnected(NodeId),
 }
 
 impl BrokerMessage {
@@ -112,12 +144,15 @@ impl BrokerMessage {
         match self {
             Self::Subscribe { .. } => ProtocolTag::Subscribe,
             Self::Unsubscribe { .. } => ProtocolTag::Unsubscribe,
+            Self::BatchSubscribe { .. } => ProtocolTag::BatchSubscribe,
+            Self::BatchUnsubscribe { .. } => ProtocolTag::BatchUnsubscribe,
             Self::Publish { .. } => ProtocolTag::Publish,
             Self::Broadcast { .. } => ProtocolTag::Broadcast,
             Self::BroadCastFrom { .. } => ProtocolTag::BroadcastFromClient,
             Self::AuthorizeClient { .. } => ProtocolTag::AuthorizeClient,
             Self::KickNode { .. } => ProtocolTag::KickClient,
             Self::Welcome { .. } => ProtocolTag::Welcome,
+            Self::NodeDisconnected { .. } => ProtocolTag::NodeDisconnected,
         }
     }
 
@@ -125,11 +160,13 @@ impl BrokerMessage {
         let tl = Topic::topic_length();
         match tag {
             ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => 1 + 4 + tl,
+            ProtocolTag::BatchSubscribe | ProtocolTag::BatchUnsubscribe => 1 + 4 + 1,
             ProtocolTag::Publish => 1 + tl + 2,
             ProtocolTag::Broadcast => 1 + 2,
             ProtocolTag::BroadcastFromClient => 1 + 4 + 2,
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => 1 + 4,
             ProtocolTag::Welcome => 1 + 4,
+            ProtocolTag::NodeDisconnected => 1 + 4,
         }
     }
 
@@ -167,6 +204,16 @@ impl BrokerMessage {
                     Ok(Self::Subscribe { client_id, topic })
                 } else {
                     Ok(Self::Unsubscribe { client_id, topic })
+                }
+            }
+            ProtocolTag::BatchSubscribe | ProtocolTag::BatchUnsubscribe => {
+                let client_id = payload.get_u32_le();
+                let pattern = TopicPattern::deserialize(&mut payload)?;
+
+                if tag == ProtocolTag::BatchSubscribe {
+                    Ok(Self::BatchSubscribe { client_id, pattern })
+                } else {
+                    Ok(Self::BatchUnsubscribe { client_id, pattern })
                 }
             }
             ProtocolTag::Publish => {
@@ -224,14 +271,18 @@ impl BrokerMessage {
             ProtocolTag::AuthorizeClient | ProtocolTag::KickClient => {
                 let client_id = payload.get_u32_le();
                 if tag == ProtocolTag::AuthorizeClient {
-                    Ok(Self::AuthorizeClient { client_id })
+                    Ok(Self::AuthorizeClient(client_id))
                 } else {
-                    Ok(Self::KickNode { client_id })
+                    Ok(Self::KickNode(client_id))
                 }
             }
-            ProtocolTag::Welcome => {
+            ProtocolTag::Welcome | ProtocolTag::NodeDisconnected => {
                 let client_id = payload.get_u32_le();
-                Ok(Self::Welcome { node_id: client_id })
+                if tag == ProtocolTag::NodeDisconnected {
+                    Ok(Self::NodeDisconnected(client_id))
+                } else {
+                    Ok(Self::Welcome(client_id))
+                }
             }
         }
     }
@@ -249,6 +300,11 @@ impl BrokerMessage {
                 buf.put_u32_le(*client_id);
                 buf.put_slice(topic);
             }
+            Self::BatchSubscribe { client_id, pattern }
+            | Self::BatchUnsubscribe { client_id, pattern } => {
+                buf.put_u32_le(*client_id);
+                pattern.serialize(buf);
+            }
             Self::Publish { topic, payload } => {
                 buf.put_slice(topic);
                 buf.put_u16_le(payload.len() as u16);
@@ -263,9 +319,10 @@ impl BrokerMessage {
                 buf.put_u16_le(payload.len() as u16);
                 buf.put_slice(payload);
             }
-            Self::AuthorizeClient { client_id }
-            | Self::KickNode { client_id }
-            | Self::Welcome { node_id: client_id } => {
+            Self::AuthorizeClient(client_id)
+            | Self::KickNode(client_id)
+            | Self::Welcome(client_id)
+            | Self::NodeDisconnected(client_id) => {
                 buf.put_u32_le(*client_id);
             }
         }

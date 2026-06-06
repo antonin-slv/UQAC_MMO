@@ -5,7 +5,7 @@ mod docker_manager;
 use crate::docker_manager::DockerManager;
 use anyhow::Result;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use dotenv::dotenv;
 use game_message::GameMessageHeaders;
 use game_message::msg_dgs::{Heartbeat, HeartbeatMessage};
@@ -199,8 +199,12 @@ async fn listen_broker(
             ClientNetworkEvent::Connected => {
                 println!("[Orchestrator] Connected (waiting to be ready)");
             }
-            ClientNetworkEvent::Disconnected => {
-                println!("[Orchestrator] Déconnecté du Broker !");
+            ClientNetworkEvent::Disconnected(node_id) => {
+                if node_id == 0 || node_id == broker_api.node_id.unwrap_or(node_id) {
+                    println!(
+                        "❌ [Spatial/Auth] Perte de connexion au Broker ! Tentative de reconnexion dans 1s..."
+                    );
+                }
             }
             ClientNetworkEvent::DataReceived {
                 client_id: _,

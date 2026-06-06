@@ -1,14 +1,13 @@
+use crate::chunks::GameChunk;
+
+pub mod chunks;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct GameChunk {
-    pub x: i16,
-    pub y: i16,
-}
 
 impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
@@ -89,7 +88,3 @@ impl Rect {
     }
 }
 
-pub fn get_chunk_size(world_size: f32, max_division: u8) -> f32 {
-    let num_division = 2 << max_division;
-    world_size / (num_division as f32)
-}

@@ -5,7 +5,7 @@ use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_message::msg_client_server::*;
 use game_message::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
@@ -247,8 +247,10 @@ fn network_bridge_system(
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
             }
-            ClientNetworkEvent::Disconnected => {
-                panic!("Disconnected from broker (this is bad)");
+            ClientNetworkEvent::Disconnected(disco_id) => {
+                if disco_id == server_info.server_broker_id || disco_id == 0 {
+                    panic!("Disconnected from broker (this is bad)");
+                }
             }
 
             ClientNetworkEvent::DataReceived {
