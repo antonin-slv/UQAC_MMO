@@ -43,7 +43,7 @@ impl ShardManager {
         broker: &BrokerClient,
     ) {
         println!("New Shards : {:?}", shards);
-        broker.spawn_new_dgs();
+        //broker.spawn_new_dgs();
 
         let mut old_dgs_id = Vec::new();
         if let Some(parent) = parent {
@@ -65,18 +65,20 @@ impl ShardManager {
                     .insert(shard_id, (shard_entities, Some(new_dgs)));
             } else {
                 self.shard_without_dgs.push_back(shard_id);
+                self.shards.insert(shard_id, (HashSet::new(), None));
             }
         }
     }
 
     pub fn on_shard_destroyed(
         &mut self,
-        parent: (ShardId, Rect),
-        shards: Vec<(ShardId, Rect)>,
+        parent: ShardId,
+        parent_bounds: Rect,
+        shards: Vec<ShardId>,
         broker: &BrokerClient,
     ) {
         println!("Destroyed Shards : {:?}", shards);
-        for (shard_id, bounds) in shards {
+        for shard_id in shards {
             if let Some(pos) = self
                 .shard_without_dgs
                 .iter()
@@ -92,18 +94,18 @@ impl ShardManager {
                 .find(|(_, shards)| shards.contains(&shard_id))
             {
                 let mut old_dgs_ids = Vec::new();
-                let shard = self.shards.get(&parent.0);
+                let shard = self.shards.get(&parent);
                 if let Some((_, dgs)) = shard {
                     if let Some(dgs) = dgs {
                         old_dgs_ids.push(dgs.clone());
                     }
                 }
 
-                broker.remove_shard_to_dgs(dgs.clone(), vec![bounds], old_dgs_ids);
+                broker.remove_shard_to_dgs(dgs.clone(), vec![parent_bounds], old_dgs_ids);
             }
         }
 
-        self.on_new_shard(None, vec![parent], broker);
+        self.on_new_shard(None, vec![(parent, parent_bounds)], broker);
     }
 
     pub fn on_new_dgs(&mut self, dgs_id: NodeId) {
@@ -111,6 +113,11 @@ impl ShardManager {
             let mut shards = HashSet::new();
             shards.insert(shard_id);
             self.active_dgs.insert(dgs_id, shards);
+            let mut shard_entities: HashSet<Entity> = HashSet::new();
+            if let Some((entities, _)) = self.shards.get(&shard_id) {
+                shard_entities = entities.clone();
+            }
+            self.shards.insert(shard_id, (shard_entities, Some(dgs_id)));
         } else {
             self.dgs_without_shards.push_back(dgs_id);
         }

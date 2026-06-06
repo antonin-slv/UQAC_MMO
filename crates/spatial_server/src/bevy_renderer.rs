@@ -6,6 +6,7 @@ use bevy::camera::Camera2d;
 use bevy::color::{Color, Srgba};
 use bevy::math::{Isometry2d, Rot2, Vec2};
 use bevy::prelude::{Commands, Gizmos, Res, ResMut, Resource};
+use bevy_text_gizmos::TextGizmos;
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
 
@@ -50,11 +51,11 @@ fn receive_snapshots(
 }
 
 fn draw_gizmos(mut gizmos: Gizmos, snapshot: Res<LocalQuadTreeSnapshot>) {
-    if let Some(ref quad_tree) = snapshot.quad_tree {
-        draw_quadtree(&mut gizmos, quad_tree);
-    }
+    if let Some(ref quad_tree) = snapshot.quad_tree
+        && let Some(ref shard_manager) = snapshot.shard_manager
+    {
+        draw_quadtree(&mut gizmos, quad_tree, shard_manager);
 
-    if let Some(ref shard_manager) = snapshot.shard_manager {
         for entity in shard_manager.get_entities() {
             let start = Isometry2d::new(Vec2::new(entity.pos.x, entity.pos.y), Rot2::IDENTITY);
             gizmos.circle_2d(start, 5.0, Color::Srgba(Srgba::BLUE));
@@ -62,10 +63,10 @@ fn draw_gizmos(mut gizmos: Gizmos, snapshot: Res<LocalQuadTreeSnapshot>) {
     }
 }
 
-fn draw_quadtree(gizmos: &mut Gizmos, quad_tree: &QuadTree) {
+fn draw_quadtree(gizmos: &mut Gizmos, quad_tree: &QuadTree, shard_manager: &ShardManager) {
     if let Some(children) = quad_tree.children.as_ref() {
         for child in children.iter() {
-            draw_quadtree(gizmos, child);
+            draw_quadtree(gizmos, child, shard_manager);
         }
     } else {
         let size = Vec2::new(
@@ -80,5 +81,16 @@ fn draw_quadtree(gizmos: &mut Gizmos, quad_tree: &QuadTree) {
             Rot2::IDENTITY,
         );
         gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
+        if let Some((_, dgs)) = shard_manager.shards.get(&quad_tree.shard_id) {
+            if let Some(dgs) = dgs {
+                gizmos.text_2d(
+                    start,
+                    format!("{}", dgs).as_str(),
+                    16.0 - quad_tree.depth as f32,
+                    Vec2::ZERO,
+                    Color::WHITE,
+                );
+            }
+        }
     }
 }

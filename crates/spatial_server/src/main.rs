@@ -47,7 +47,22 @@ async fn main() -> Result<()> {
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
                     }
                     QuadTreeCommand::TryMerge => {
-                        quad_tree.try_merge(&mut shard_manager, &broker_client);
+                        let merged_shards = quad_tree.try_merge(&mut shard_manager);
+                        for (shard_id, merged_shards) in merged_shards {
+                            let bounds = quad_tree.get_shard_bounds(&shard_id);
+                            if let Some((bounds, _)) = bounds {
+                                shard_manager.on_shard_destroyed(
+                                    shard_id,
+                                    bounds,
+                                    merged_shards,
+                                    &broker_client,
+                                );
+                            }
+                        }
+                        println!("Active DGS : {:?}", shard_manager.active_dgs);
+                        println!("Shards : {:?}", shard_manager.shards);
+                        println!("Shard without dgs : {:?}", shard_manager.shard_without_dgs);
+                        println!("DGS without shard : {:?}", shard_manager.dgs_without_shards);
 
                         #[cfg(feature = "debug_visual")]
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
