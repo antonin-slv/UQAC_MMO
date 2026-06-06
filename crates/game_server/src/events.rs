@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use broker_protocol::broker_message::NodeId;
-use core_types::GameChunk;
+use core_types::chunks::GameChunk;
 use game_message::msg_client_server;
 
 #[derive(Message, Debug)]

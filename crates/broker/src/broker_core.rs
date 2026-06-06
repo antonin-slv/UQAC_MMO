@@ -6,11 +6,12 @@ use uuid::Uuid;
 
 use broker_protocol::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
 use broker_protocol::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
-use broker_protocol::broker_topics;
-use broker_protocol::broker_topics::{
+use broker_protocol::topics;
+use broker_protocol::topics::{
     Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
 };
 use game_sockets::protocols::QuicBackend;
+use game_sockets::GameStreamReliability::Reliable;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
@@ -28,15 +29,17 @@ pub struct Broker {
     next_client_id: NodeId,
     next_server_id: NodeId,
 
-    // Routage Unifié (Clients & Serveurs mélangés)
     uuid_to_node_id: FastMap<Uuid, NodeId>,
-    node_id_to_connection: FastMap<NodeId, GameConnection>,
-
+    client_connections: FastMap<NodeId, GameConnection>,
+    server_connections: FastMap<NodeId, GameConnection>,
     // Pare-feu (Clients uniquement)
     not_authenticated_clients: FastSet<NodeId>,
 
-    // Abonnements Unifiés
-    topic_subscribers: FastMap<Topic, FastIterableSet<NodeId>>,
+    // Abonnements Séparés
+    client_subscribers: FastMap<Topic, FastIterableSet<NodeId>>,
+    server_subscribers: FastMap<Topic, FastIterableSet<NodeId>>,
+
+    // Pour la déconnexion
     node_id_to_topics: FastMap<NodeId, FastIterableSet<Topic>>,
 }
 
@@ -78,9 +81,12 @@ impl Broker {
             next_client_id: NodeId::FIRST_CLIENT_ID,
             next_server_id: NodeId::FIRST_SERVER_ID,
             uuid_to_node_id: FastMap::default(),
-            node_id_to_connection: FastMap::default(),
+            client_connections: FastMap::default(),
+            server_connections: FastMap::default(),
             not_authenticated_clients: FastSet::default(),
-            topic_subscribers: FastMap::default(),
+
+            client_subscribers: FastMap::default(),
+            server_subscribers: FastMap::default(),
             node_id_to_topics: FastMap::default(),
         }
     }
@@ -98,7 +104,12 @@ impl Broker {
 
     fn handle_disconnect(&mut self, conn_uuid: Uuid) {
         if let Some(node_id) = self.uuid_to_node_id.remove(&conn_uuid) {
-            self.node_id_to_connection.remove(&node_id);
+            let map = if node_id.is_server() {
+                &mut self.server_connections
+            } else {
+                &mut self.client_connections
+            };
+            map.remove(&node_id);
 
             if let Some(topics) = self.node_id_to_topics.remove(&node_id) {
                 for topic in topics {
@@ -106,11 +117,25 @@ impl Broker {
                 }
             }
 
-            if node_id.is_server() {
+            let namespace = if node_id.is_server() {
                 println!("[RÉSEAU] Serveur déconnecté : ID {:X}", node_id);
+                Namespace::ServerConnection
             } else {
                 self.not_authenticated_clients.remove(&node_id);
                 println!("[RÉSEAU] Client déconnecté : ID {}", node_id);
+                Namespace::ClientAuth
+            };
+            let system_topic = TopicBuilder::new(SecurityDomain::PrivateRW, namespace).build();
+
+            let mock_stream = GameStream::new(RELIABLE_STREAM_ID, Reliable);
+            let disconnect_msg = BrokerMessage::NodeDisconnected(node_id);
+            self.route_message(disconnect_msg, system_topic, mock_stream);
+
+            // 4. Retrait final des maps de connexions
+            if node_id.is_server() {
+                self.server_connections.remove(&node_id);
+            } else {
+                self.client_connections.remove(&node_id);
             }
         }
     }
@@ -125,7 +150,7 @@ impl Broker {
                 let id = self.next_client_id;
                 self.next_client_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
-                self.node_id_to_connection.insert(id, conn);
+                self.client_connections.insert(id, conn);
                 self.not_authenticated_clients.insert(id);
                 let direct_line_topic =
                     TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::NodeLine)
@@ -141,7 +166,7 @@ impl Broker {
                 };
 
                 if stream.is_reliable() && stream.real_stream_id() == RELIABLE_STREAM_ID {
-                    let msg = BrokerMessage::Welcome { node_id };
+                    let msg = BrokerMessage::Welcome(node_id);
                     self.public_peer
                         .send(&connection, &stream, msg.serialize())
                         .unwrap_or_else(|e| {
@@ -180,6 +205,18 @@ impl Broker {
                             eprintln!("[SÉCURITÉ] Accès LECTURE refusé à {}", node_id);
                         }
                     }
+                    BrokerMessage::BatchSubscribe { .. } => {
+                        println!(
+                            "[RÉSEAU PUBLIC] Client {} abonnement batch. REFUSE",
+                            node_id
+                        );
+                    }
+                    BrokerMessage::BatchUnsubscribe { .. } => {
+                        println!(
+                            "[RÉSEAU PUBLIC] Client {} désinscription batch. REFUSE",
+                            node_id
+                        );
+                    }
                     BrokerMessage::Unsubscribe { topic, .. } => {
                         self.node_unsubscribe(node_id, topic);
                     }
@@ -190,7 +227,7 @@ impl Broker {
                         }
                         if !self.not_authenticated_clients.contains(&node_id)
                             || topic.namespace()
-                                == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
+                                == Some(topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
                             self.route_message(
                                 BroadCastFrom {
@@ -199,7 +236,6 @@ impl Broker {
                                 },
                                 topic,
                                 stream,
-                                false,
                             );
                         } else {
                             eprintln!(
@@ -230,7 +266,7 @@ impl Broker {
                 let id = self.next_server_id;
                 self.next_server_id += 1;
                 self.uuid_to_node_id.insert(conn.connection_uuid, id);
-                self.node_id_to_connection.insert(id, conn);
+                self.server_connections.insert(id, conn);
 
                 let topic_builder =
                     TopicBuilder::new(SecurityDomain::PrivateReadPublicWrite, Namespace::NodeLine)
@@ -255,7 +291,7 @@ impl Broker {
                     return;
                 };
                 if stream.is_reliable() && stream.real_stream_id() == RELIABLE_STREAM_ID {
-                    let msg = BrokerMessage::Welcome { node_id };
+                    let msg = BrokerMessage::Welcome(node_id);
                     self.private_peer
                         .send(&connection, &stream, msg.serialize())
                         .unwrap_or_else(|e| {
@@ -293,24 +329,41 @@ impl Broker {
                         let target_id = if client_id == 0 { node_id } else { client_id };
                         self.node_unsubscribe(target_id, topic);
                     }
+                    BrokerMessage::BatchSubscribe { client_id, pattern } => {
+                        let target_id = if client_id == 0 { node_id } else { client_id };
+                        pattern.unpack_into(|topic| {
+                            self.node_subscribe(target_id, topic);
+                        });
+                    }
+                    BrokerMessage::BatchUnsubscribe { client_id, pattern } => {
+                        let target_id = if client_id == 0 { node_id } else { client_id };
+                        pattern.unpack_into(|topic| {
+                            self.node_unsubscribe(target_id, topic);
+                        });
+                    }
                     BrokerMessage::Publish { topic, payload } => {
                         // Les serveurs sont dignes de confiance. On forward ce qu'ils ont pré-packagé
                         // (Généralement un ProtocolTag::Broadcast ou BroadcastFromClient)
-                        self.route_message(Broadcast { payload }, topic, stream, false);
+                        self.route_message(Broadcast { payload }, topic, stream);
                     }
-                    BrokerMessage::AuthorizeClient { client_id } => {
-                        if self.not_authenticated_clients.remove(&client_id) {
-                            println!("[RÉSEAU PRIVÉ] Badge accordé à {}", client_id);
+                    BrokerMessage::AuthorizeClient(node_id) => {
+                        if self.not_authenticated_clients.remove(&node_id) {
+                            println!("[RÉSEAU PRIVÉ] Badge accordé à {}", node_id);
                         }
                     }
-                    BrokerMessage::KickNode { client_id } => {
-                        if let Some(conn) = self.node_id_to_connection.get(&client_id) {
-                            if client_id.is_server() {
+                    BrokerMessage::KickNode(node_id) => {
+                        let map = if node_id.is_server() {
+                            &mut self.server_connections
+                        } else {
+                            &mut self.client_connections
+                        };
+                        if let Some(conn) = map.get(&node_id) {
+                            if node_id.is_server() {
                                 let _ = self.private_peer.disconnect(conn);
                             } else {
                                 let _ = self.public_peer.disconnect(conn);
                             }
-                            println!("🔑 [Auth] Le Nœud {:X} a été éjecté.", client_id);
+                            println!("🔑 [Auth] Le Nœud {:X} a été éjecté.", node_id);
                         }
                     }
                     _ => {}
@@ -321,8 +374,12 @@ impl Broker {
     }
 
     fn node_subscribe(&mut self, node_id: NodeId, topic: Topic) {
-        let vec = self
-            .topic_subscribers
+        let map = if node_id.is_server() {
+            &mut self.server_subscribers
+        } else {
+            &mut self.client_subscribers
+        };
+        let vec = map
             .entry(topic.clone())
             .or_insert_with(|| FastIterableSet::with_capacity(16));
         vec.insert(node_id);
@@ -334,9 +391,14 @@ impl Broker {
     }
 
     fn node_unsubscribe(&mut self, node_id: NodeId, topic: Topic) {
-        if let Some(subscribers) = self.topic_subscribers.get_mut(&topic) {
+        let map = if node_id.is_server() {
+            &mut self.server_subscribers
+        } else {
+            &mut self.client_subscribers
+        };
+        if let Some(subscribers) = map.get_mut(&topic) {
             if subscribers.swap_remove(&node_id) && subscribers.is_empty() {
-                self.topic_subscribers.remove(&topic);
+                map.remove(&topic);
             }
         }
         if let Some(topics) = self.node_id_to_topics.get_mut(&node_id) {
@@ -349,27 +411,30 @@ impl Broker {
 
     /// === LA FONCTION DE ROUTAGE ZERO-COPY ===
     /// Elle prend un buffer pré-formaté et l'injecte directement dans les Sockets.
-    fn route_message(
-        &self,
-        message: BrokerMessage,
-        topic: Topic,
-        stream: GameStream,
-        debug_print: bool,
-    ) {
-        if let Some(nodes) = self.topic_subscribers.get(&topic) {
-            let final_bytes = message.serialize();
+    fn route_message(&self, message: BrokerMessage, topic: Topic, stream: GameStream) {
+        let server_nodes = self.server_subscribers.get(&topic);
+        let client_nodes = self.client_subscribers.get(&topic);
 
-            for &node_id in nodes {
-                if let Some(conn) = self.node_id_to_connection.get(&node_id) {
-                    if debug_print {
-                        println!("\t to {:X}", node_id);
-                    }
+        if server_nodes.is_none() || client_nodes.is_none() {
+            return;
+        }
 
-                    if node_id.is_server() {
-                        let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
-                    } else {
-                        let _ = self.public_peer.send(conn, &stream, final_bytes.clone());
-                    }
+        let final_bytes = message.serialize();
+
+        // 1. Envoi à tous les serveurs (Private Peer)
+        if let Some(server_nodes) = server_nodes {
+            for &node_id in server_nodes {
+                if let Some(conn) = self.server_connections.get(&node_id) {
+                    let _ = self.private_peer.send(conn, &stream, final_bytes.clone());
+                }
+            }
+        }
+
+        // 2. Envoi à tous les clients (Public Peer)
+        if let Some(client_nodes) = client_nodes {
+            for &node_id in client_nodes {
+                if let Some(conn) = self.client_connections.get(&node_id) {
+                    let _ = self.public_peer.send(conn, &stream, final_bytes.clone());
                 }
             }
         }

@@ -1,5 +1,5 @@
 ﻿use broker_protocol::broker_message::BrokerMessage;
-use broker_protocol::broker_topics::Topic;
+use broker_protocol::topics::Topic;
 use bytes::{BufMut, Bytes, BytesMut};
 
 pub mod core_types;

@@ -5,7 +5,7 @@ mod structs;
 use crate::launcher::LauncherPlugin;
 use crate::structs::{ClientState, LocalPlayer};
 use bevy::prelude::*;
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use game_message::msg_client_server::{PlayerInput, PlayerInputMsg};
 
 #[derive(Bundle)]

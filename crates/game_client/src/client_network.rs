@@ -6,7 +6,7 @@ use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_topics::{
+use broker_protocol::topics::{
     AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, SecurityDomain, TopicBuilder,
 };
 use game_message::GameMessageHeaders;
@@ -113,7 +113,10 @@ fn network_bridge_system(
             },
 
             // ÉTAPE 3 : Déconnexion
-            ClientNetworkEvent::Disconnected => {
+            ClientNetworkEvent::Disconnected(node_id) => {
+                if node_id != 0 && local_player.net_id != node_id {
+                    continue;
+                }
                 println!("[Client] Déconnecté du serveur.");
                 local_player.net_id = 0;
                 next_state.set(ClientState::LoginMenu);

@@ -1,6 +1,7 @@
 use crate::{NetRead, NetWrite, NetWriteTo};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::{GameChunk, Rect};
+use core_types::{Rect};
+use core_types::chunks::GameChunk;
 
 impl NetWriteTo for Rect {
     fn write_to(&self, buf: &mut BytesMut) {
