@@ -1,68 +1,35 @@
 ﻿// -- les différents streams de données
 
-use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
-use bincode::Options;
+use bitcode::{Decode, Encode};
+use crate::{impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::GameChunk;
-use rocket::serde::{Deserialize, Serialize};
 
 //
 // CLIENT SERVER COMMUNICATION
 //
 pub type Input = [u8; 16];
 
-#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
+#[derive(Encode, Decode, Copy, Clone, Debug)]
 pub struct EntitySnapshot {
     pub network_id: NodeId,
     pub position: [f32; 2],
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct PersonalSnapshot {
     pub entities: Vec<EntitySnapshot>,
 }
 
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct SnapshotMsg {
     pub snapshot: PersonalSnapshot,
 }
 
-impl NetWrite for SnapshotMsg {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::new();
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
+impl_bitcode_net_message!(SnapshotMsg, GameMessageHeaders::Snapshot);
 
-impl NetRead for SnapshotMsg {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        let mut reader = data.reader();
-        match bincode::deserialize_from(&mut reader) {
-            Ok(snapshot) => Ok(SnapshotMsg { snapshot }),
-            Err(e) => Err(format!("Impossible de désérialiser le snapshot: {}", e)),
-        }
-    }
-}
-
-impl NetWriteTo for SnapshotMsg {
-    fn write_to(&self, buf: &mut BytesMut) {
-        if let Err(e) = bincode::options()
-            .with_fixint_encoding()
-            .serialize_into(buf.writer(), &self.snapshot)
-        {
-            eprintln!("Erreur lors de la sérialisation du snapshot: {}", e);
-        }
-    }
-}
-
-impl GameMessage for SnapshotMsg {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::Snapshot
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Encode, Decode, Clone, Debug, Default, PartialEq)]
 pub struct PlayerInput(pub u16);
 
 pub struct PlayerInputMsg {

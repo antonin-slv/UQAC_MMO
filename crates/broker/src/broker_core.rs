@@ -7,9 +7,7 @@ use uuid::Uuid;
 use broker_protocol::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
 use broker_protocol::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
 use broker_protocol::topics;
-use broker_protocol::topics::{
-    Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
-};
+use broker_protocol::topics::{Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface};
 use game_sockets::protocols::QuicBackend;
 use game_sockets::GameStreamReliability::Reliable;
 use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
@@ -200,6 +198,10 @@ impl Broker {
                 match message {
                     BrokerMessage::Subscribe { topic, .. } => {
                         if topic.security_domain() == Some(SecurityDomain::PublicReadPrivateWrite) {
+                            println!(
+                                "[SÉCURITÉ] Abonnement CLIENT {} au topic {:?}",
+                                node_id, topic
+                            );
                             self.node_subscribe(node_id, topic);
                         } else {
                             eprintln!("[SÉCURITÉ] Accès LECTURE refusé à {}", node_id);
@@ -218,6 +220,10 @@ impl Broker {
                         );
                     }
                     BrokerMessage::Unsubscribe { topic, .. } => {
+                        println!(
+                            "[SÉCURITÉ] Abonnement CLIENT {} au topic {:?}",
+                            node_id, topic
+                        );
                         self.node_unsubscribe(node_id, topic);
                     }
                     BrokerMessage::Publish { topic, payload } => {
@@ -415,7 +421,7 @@ impl Broker {
         let server_nodes = self.server_subscribers.get(&topic);
         let client_nodes = self.client_subscribers.get(&topic);
 
-        if server_nodes.is_none() || client_nodes.is_none() {
+        if server_nodes.is_none() && client_nodes.is_none() {
             return;
         }
 
