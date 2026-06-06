@@ -7,10 +7,10 @@ use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
-use game_message::{GameMessageHeaders, GamePayload};
 use game_message::msg_client_server::*;
 use game_message::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
+use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
 
 const INNER_IP_ENV_NAME: &str = "SERVER_LISTEN_IP";
@@ -191,6 +191,7 @@ fn send_heartbeat_system(
     if timer.timer.just_finished() {
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
+            node_id: broker.client.node_id.unwrap_or(0),
             zone: server_info.zone.clone(),
             player_count: client_directory.sessions.len(),
             max_players: server_info.max_players,

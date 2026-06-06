@@ -1,12 +1,115 @@
-﻿use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::GameChunk;
+use core_types::{GameChunk, Rect};
 use rocket::serde::json::serde_json;
 use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
     pub game_chunk: GameChunk,
+}
+
+pub enum ChunkHandOffAction {
+    TakeArea,
+    AreaTook,
+    ReleaseArea,
+}
+
+impl NetWrite for ChunkHandOffAction {
+    fn serialize(&self) -> Bytes {
+        let mut buf = BytesMut::new();
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
+}
+
+impl NetWriteTo for ChunkHandOffAction {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u8(match self {
+            ChunkHandOffAction::TakeArea => 0u8,
+            ChunkHandOffAction::AreaTook => 1u8,
+            ChunkHandOffAction::ReleaseArea => 2u8,
+        });
+    }
+}
+
+impl NetRead for ChunkHandOffAction {
+    fn deserialize(buf: &mut Bytes) -> Result<Self, String> {
+        let data = buf.get_u8();
+        match data {
+            0 => Ok(ChunkHandOffAction::TakeArea),
+            1 => Ok(ChunkHandOffAction::AreaTook),
+            2 => Ok(ChunkHandOffAction::ReleaseArea),
+            _ => Err(format!("Unknown chunk handoff type {}", data)),
+        }
+    }
+}
+
+pub struct ChunkHandOff {
+    pub action: ChunkHandOffAction,
+    pub old_dgs_ids: Vec<NodeId>,
+    pub areas: Vec<Rect>,
+}
+
+impl NetWriteTo for ChunkHandOff {
+    fn write_to(&self, buf: &mut BytesMut) {
+        self.action.write_to(buf);
+        buf.put_u8(self.areas.len() as u8);
+        buf.put_u8(self.old_dgs_ids.len() as u8);
+        for id in self.old_dgs_ids.iter() {
+            buf.put_u32_le(*id);
+        }
+        for chunk in &self.areas {
+            chunk.write_to(buf);
+        }
+    }
+}
+
+impl GameMessage for ChunkHandOff {
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::ChunkHandOff
+    }
+}
+
+impl NetWrite for ChunkHandOff {
+    fn serialize(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(5);
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
+}
+
+impl NetRead for ChunkHandOff {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        match ChunkHandOffAction::deserialize(data) {
+            Ok(action) => {
+                let old_dgs_id_len = data.get_u8();
+                let mut old_dgs_ids = vec![];
+                for _ in 0..old_dgs_id_len {
+                    old_dgs_ids.push(data.get_u32_le());
+                }
+
+                let areas_len = data.get_u8() as usize;
+                let mut areas = Vec::with_capacity(areas_len);
+                for _ in 0..areas_len {
+                    let err = match Rect::deserialize(data) {
+                        Ok(rect) => Ok(areas.push(rect)),
+                        Err(e) => Err(format!("ChunkHandOffType : {}", e)),
+                    };
+                    if err.is_err() {
+                        return Err(err.unwrap_err());
+                    }
+                }
+
+                Ok(Self {
+                    action,
+                    areas,
+                    old_dgs_ids,
+                })
+            }
+            Err(e) => Err(format!("ChunkHandOffType : {}", e)),
+        }
+    }
 }
 
 impl NetWriteTo for TakeChunkMessage {
@@ -38,28 +141,10 @@ impl NetRead for TakeChunkMessage {
     }
 }
 
-impl NetWriteTo for GameChunk {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_i16_le(self.x);
-        buf.put_i16_le(self.y);
-    }
-}
-
-impl NetRead for GameChunk {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        if data.remaining() < 4 {
-            return Err("GameChunk: buffer trop court".into());
-        }
-        Ok(Self {
-            x: data.get_i16_le(),
-            y: data.get_i16_le(),
-        })
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Heartbeat {
     pub id: String,
+    pub node_id: NodeId,
     pub zone: String,
     pub player_count: usize,
     pub max_players: usize,

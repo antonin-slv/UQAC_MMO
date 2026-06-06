@@ -9,8 +9,8 @@ use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use dotenv::dotenv;
 use game_message::GameMessageHeaders;
 use game_message::msg_dgs::{Heartbeat, HeartbeatMessage};
-use game_message::msg_servers::{ServerHelloMSG, ServerType};
-use not_games::redis_manager::{RedisManager, GameServer};
+use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use not_games::redis_manager::{GameServer, RedisManager};
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
     println!("Start tasks");
 
     let redis_heartbeat = Arc::clone(&redis);
-    let temp_docker = Arc::clone(&docker);
+    let docker_heartbeat = Arc::clone(&docker);
 
     // Création du canal de synchronisation
     let (broker_ready_tx, broker_ready_rx) = oneshot::channel();
@@ -55,14 +55,14 @@ async fn main() -> Result<()> {
         let mut client = MmoNetworkClient::new();
         client
             .connect(
-                temp_docker.broker_ip.as_str(),
-                temp_docker.broker_private_port,
+                docker_heartbeat.broker_ip.as_str(),
+                docker_heartbeat.broker_private_port,
             )
             .expect("TODO: panic message");
 
         println!(
             "Orchestrator connecting to Broker at {}:{}",
-            temp_docker.broker_ip, temp_docker.broker_private_port
+            docker_heartbeat.broker_ip, docker_heartbeat.broker_private_port
         );
 
         // On encapsule le sender dans un Option pour pouvoir le consommer (take) une seule fois
@@ -72,7 +72,14 @@ async fn main() -> Result<()> {
             ticker.tick().await;
 
             // On passe le canal à listen_broker pour qu'il le déclenche au bon moment
-            if let Err(e) = listen_broker(&mut client, &redis_heartbeat, &mut ready_tx_opt).await {
+            if let Err(e) = listen_broker(
+                &mut client,
+                &docker_heartbeat,
+                &redis_heartbeat,
+                &mut ready_tx_opt,
+            )
+            .await
+            {
                 println!("Orchestrator network error: {}", e);
             }
         }
@@ -148,6 +155,7 @@ async fn spawn_server(docker: &DockerManager, redis: &RedisManager) -> Result<Ga
 // Nouvelle fonction de routage qui accepte le canal de synchronisation
 async fn listen_broker(
     broker_api: &mut MmoNetworkClient,
+    docker: &DockerManager,
     redis: &RedisManager,
     ready_tx: &mut Option<oneshot::Sender<()>>,
 ) -> Result<()> {
@@ -178,6 +186,11 @@ async fn listen_broker(
 
                 broker_api.subscribe(auth_topic, 0); //he listens the hello of the servers, I guess.
 
+                broker_api.subscribe(
+                    TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build(),
+                    0,
+                );
+
                 // ---> MAGIE : On débloque la tâche de scaling ! <---
                 if let Some(tx) = ready_tx.take() {
                     let _ = tx.send(()); // Le canal est consommé, le signal est envoyé
@@ -203,6 +216,24 @@ async fn listen_broker(
                             }
                             Err(e) => {
                                 println!("[Orchestrator] Heartbeat error: {}", e);
+                            }
+                        }
+                    }
+                    GameMessageHeaders::SpawnServer => {
+                        let spawn_server_msg = payload.extract::<SpawnServerMSG>();
+                        match spawn_server_msg {
+                            Ok(spawn_server_msg) => {
+                                for _ in 0..spawn_server_msg.server_count {
+                                    match spawn_server(&docker, &redis).await {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            eprintln!("{e}")
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                println!("[Orchestrator] Spawn server error: {}", e);
                             }
                         }
                     }

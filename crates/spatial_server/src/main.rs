@@ -17,8 +17,6 @@ mod broker_client;
 mod quadtree;
 mod shard_manager;
 
-const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
-
 pub enum QuadTreeCommand {
     MoveEntity(Entity),
     TryMerge,
@@ -32,37 +30,34 @@ async fn main() -> Result<()> {
 
     let (bevy_tx, bevy_rx) = std::sync::mpsc::channel::<(QuadTree, ShardManager)>();
 
-    tokio::spawn(async move {
+    let quad_tree_handle = tokio::spawn(async move {
         let mut shard_manager = ShardManager::new();
-        let mut quad_tree = QuadTree::new(&mut shard_manager);
+        let mut broker_client = BrokerClient::new();
+        let mut quad_tree = QuadTree::new(&mut shard_manager, &broker_client);
 
         println!("[Acteur QuadTree] Initialisé et à l'écoute...");
 
-        while let Some(command) = quadtree_rx.recv().await {
-            match command {
-                QuadTreeCommand::MoveEntity(entity) => {
-                    println!("[Acteur QuadTree] Moving entity {:?}", entity);
-                    quad_tree.insert(entity, &mut shard_manager);
-                    #[cfg(feature = "debug_visual")]
-                    let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
-                }
-                QuadTreeCommand::TryMerge => {
-                    quad_tree.try_merge(&mut shard_manager);
+        loop {
+            while let Ok(command) = quadtree_rx.try_recv() {
+                match command {
+                    QuadTreeCommand::MoveEntity(entity) => {
+                        quad_tree.insert(entity, &mut shard_manager, &broker_client);
 
-                    #[cfg(feature = "debug_visual")]
-                    let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                        #[cfg(feature = "debug_visual")]
+                        let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                    }
+                    QuadTreeCommand::TryMerge => {
+                        quad_tree.try_merge(&mut shard_manager, &broker_client);
+
+                        #[cfg(feature = "debug_visual")]
+                        let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                    }
                 }
             }
-        }
-    });
 
-    let quadtree_tx_poll = quadtree_tx.clone();
-
-    let broker_handle = tokio::spawn(async move {
-        let mut broker_client = BrokerClient::new();
-        loop {
-            broker_client.poll_handle(&quadtree_tx_poll).await;
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            broker_client
+                .poll_handle(&mut quad_tree, &mut shard_manager)
+                .await;
         }
     });
 
@@ -93,7 +88,7 @@ async fn main() -> Result<()> {
         start_renderer(Mutex::new(bevy_rx));
     }
 
-    tokio::try_join!(broker_handle, scaler_handle)?;
+    tokio::try_join!(quad_tree_handle, scaler_handle)?;
 
     Ok(())
 }

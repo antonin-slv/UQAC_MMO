@@ -69,3 +69,35 @@ impl GameMessage for ServerHelloMSG {
         GameMessageHeaders::FriendHello
     }
 }
+
+pub struct SpawnServerMSG {
+    pub server_count: u8,
+}
+
+impl NetRead for SpawnServerMSG {
+    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
+        Ok(Self {
+            server_count: data.get_u8(),
+        })
+    }
+}
+
+impl NetWriteTo for SpawnServerMSG {
+    fn write_to(&self, buf: &mut BytesMut) {
+        buf.put_u8(self.server_count);
+    }
+}
+
+impl NetWrite for SpawnServerMSG {
+    fn serialize(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(1);
+        self.write_to(&mut buf);
+        buf.freeze()
+    }
+}
+
+impl GameMessage for SpawnServerMSG {
+    fn header() -> GameMessageHeaders {
+        GameMessageHeaders::SpawnServer
+    }
+}
