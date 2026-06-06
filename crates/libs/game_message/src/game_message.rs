@@ -107,3 +107,53 @@ impl GamePayload {
         buf[payload_start - 2..payload_start].copy_from_slice(&payload_len.to_le_bytes());
     }
 }
+
+
+#[macro_export]
+macro_rules! impl_bitcode_net_message {
+    ($msg_type:ty, $header_variant:path) => {
+        impl $crate::GameMessage for $msg_type {
+            fn header() -> $crate::GameMessageHeaders {
+                $header_variant
+            }
+        }
+
+        impl $crate::NetWriteTo for $msg_type {
+            fn write_to(&self, buf: &mut bytes::BytesMut) {
+                use bytes::BufMut;
+
+                // bitcode::encode retourne directement un Vec<u8> fortement optimisé.
+                // On a juste à le copier dans le BytesMut final.
+                let encoded = bitcode::encode(self);
+                buf.put_slice(&encoded);
+            }
+        }
+
+        impl $crate::NetWrite for $msg_type {
+            fn serialize(&self) -> bytes::Bytes {
+                bytes::Bytes::from(bitcode::encode(self))
+            }
+        }
+
+        impl $crate::NetRead for $msg_type {
+            fn deserialize(data: &mut bytes::Bytes) -> Result<Self, String> {
+                use bytes::Buf;
+
+                // bitcode lit le slice entier. On lui passe une référence aux données.
+                match bitcode::decode::<Self>(&data) {
+                    Ok(msg) => {
+                        let len = data.remaining();
+                        data.advance(len);
+
+                        Ok(msg)
+                    }
+                    Err(e) => Err(format!(
+                        "Impossible de désérialiser {}: {:?}",
+                        stringify!($msg_type),
+                        e
+                    )),
+                }
+            }
+        }
+    };
+}

@@ -11,6 +11,4 @@ path = "src/game_message.rs"
 broker_protocol = { workspace = true }
 core_types = { workspace = true }
 bytes = { workspace = true }
-rocket = { workspace = true }
-bincode = { workspace = true }
-serde = { workspace = true }
+bitcode  = { workspace = true }

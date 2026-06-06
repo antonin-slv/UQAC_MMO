@@ -1,10 +1,9 @@
-use crate::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use bitcode::{Decode, Encode};
+use crate::{impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::{Rect};
 use core_types::chunks::GameChunk;
-use rocket::serde::json::serde_json;
-use rocket::serde::{Deserialize, Serialize};
 
 pub struct TakeChunkMessage {
     pub game_chunk: GameChunk,
@@ -142,7 +141,7 @@ impl NetRead for TakeChunkMessage {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Decode, Encode, Clone)]
 pub struct Heartbeat {
     pub id: String,
     pub node_id: NodeId,
@@ -151,60 +150,11 @@ pub struct Heartbeat {
     pub max_players: usize,
 }
 
+#[derive(Debug, Decode, Encode, Clone)]
 pub struct HeartbeatMessage {
     pub heartbeat: Heartbeat,
 }
-
-impl NetWriteTo for HeartbeatMessage {
-    fn write_to(&self, buf: &mut BytesMut) {
-        let length_index = buf.len();
-        buf.put_u16_le(0); // On réserve 2 octets (Placeholder pour la longueur finale)
-
-        let original_len = buf.len();
-        // On écrit le JSON directement dans le buffer
-        let mut writer = buf.writer();
-        if serde_json::to_writer(&mut writer, &self.heartbeat).is_err() {
-            panic!("Erreur de sérialisation du Heartbeat en JSON");
-        }
-
-        let payload_len = (buf.len() - original_len) as u16;
-
-        // On retourne au début pour écraser le placeholder avec la vraie taille !
-        buf[length_index..length_index + 2].copy_from_slice(&payload_len.to_le_bytes());
-    }
-}
-
-impl GameMessage for HeartbeatMessage {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::Heartbeat
-    }
-}
-impl NetWrite for HeartbeatMessage {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::new();
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for HeartbeatMessage {
-    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
-        if bytes.remaining() < 2 {
-            return Err("HeartbeatMessage trop court".into());
-        }
-        let message_len = bytes.get_u16_le() as usize;
-
-        if bytes.remaining() < message_len {
-            return Err("HeartbeatMessage : JSON incomplet".into());
-        }
-
-        let json_data = bytes.split_to(message_len);
-        let heartbeat: Heartbeat = serde_json::from_slice(&json_data)
-            .map_err(|e| format!("Erreur de parsing du Heartbeat : {}", e))?;
-
-        Ok(Self { heartbeat })
-    }
-}
+impl_bitcode_net_message!(HeartbeatMessage, GameMessageHeaders::Heartbeat);
 
 pub struct SpawnClientMsg {
     pub client_id: NodeId,
