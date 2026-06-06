@@ -6,7 +6,7 @@ use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_topics::{
+use broker_protocol::topics::{
     AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, SecurityDomain, TopicBuilder,
 };
 use game_message::GameMessageHeaders;

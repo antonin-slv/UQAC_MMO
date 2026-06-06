@@ -1,7 +1,7 @@
-﻿use crate::broker_topics::{Topic, TopicDefaults};
+﻿use crate::topics::{Topic, TopicDefaults};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt;
-use crate::broker_subtopic::TopicPattern;
+use crate::topic_patterns::TopicPattern;
 
 pub const RELIABLE_STREAM_ID: u16 = 0;
 

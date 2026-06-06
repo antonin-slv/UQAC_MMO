@@ -1,12 +1,12 @@
 ﻿use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_topics::{
+use broker_protocol::topics::{
     Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION
     ,
 };
 use game_message::GameMessageHeaders;
 
 use broker_protocol::broker_message::NodeId;
-use broker_protocol::broker_subtopic::TopicPattern;
+use broker_protocol::topic_patterns::TopicPattern;
 use core_types::chunks::GameChunk;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{SpawnClientMsg, TakeChunkMessage};

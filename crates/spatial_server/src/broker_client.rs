@@ -2,7 +2,7 @@ use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::{Rect, Vec2};
 use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};

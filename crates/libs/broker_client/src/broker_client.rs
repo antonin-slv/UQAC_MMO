@@ -1,6 +1,6 @@
 ﻿use broker_protocol::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
-use broker_protocol::broker_subtopic::TopicPattern;
-use broker_protocol::broker_topics::Topic;
+use broker_protocol::topic_patterns::TopicPattern;
+use broker_protocol::topics::Topic;
 use bytes::{Buf, BytesMut};
 use game_message::{GameMessage, GameMessageHeaders, GamePayload};
 use game_sockets::protocols::QuicBackend;

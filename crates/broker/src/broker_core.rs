@@ -6,8 +6,8 @@ use uuid::Uuid;
 
 use broker_protocol::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
 use broker_protocol::broker_message::{BrokerMessage, NodeId, NodeIdMetaData, RELIABLE_STREAM_ID};
-use broker_protocol::broker_topics;
-use broker_protocol::broker_topics::{
+use broker_protocol::topics;
+use broker_protocol::topics::{
     Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
 };
 use game_sockets::protocols::QuicBackend;
@@ -227,7 +227,7 @@ impl Broker {
                         }
                         if !self.not_authenticated_clients.contains(&node_id)
                             || topic.namespace()
-                                == Some(broker_topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
+                                == Some(topics::AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION)
                         {
                             self.route_message(
                                 BroadCastFrom {

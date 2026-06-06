@@ -1,14 +1,14 @@
 
-pub mod broker_topics;
+pub mod topics;
 pub mod broker_message;
-pub mod broker_subtopics;
-pub mod broker_subtopic;
+pub mod topic_layers;
+pub mod topic_patterns;
 
 #[cfg(test)]
 mod tests {
     use core_types::chunks::GameChunkAera;
-    use crate::broker_subtopic::{TopicPattern};
-    use crate::broker_topics::{Namespace, SecurityDomain, Topic, TopicDefaults};
+    use crate::topic_patterns::{TopicPattern};
+    use crate::topics::{Namespace, SecurityDomain, Topic, TopicDefaults};
 
     #[test]
     pub fn test_generic_unpacker() {

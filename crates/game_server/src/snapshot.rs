@@ -2,7 +2,7 @@
 use crate::dgs_network::{BrockerManager, NetworkId, ServerStats};
 use crate::events::AssignedChunks;
 use bevy::prelude::*;
-use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use game_message::msg_client_server::*;
 
 pub struct SnapshotPlugin;
