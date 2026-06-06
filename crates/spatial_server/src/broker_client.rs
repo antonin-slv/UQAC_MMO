@@ -4,10 +4,10 @@ use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::{Rect, Vec2, get_chunk_size};
+use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
-use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -91,12 +91,6 @@ impl BrokerClient {
                     );
 
                     self.broker_api.subscribe(
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer)
-                            .build(),
-                        0,
-                    );
-
-                    self.broker_api.subscribe(
                         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                             .build(),
                         0,
@@ -118,32 +112,29 @@ impl BrokerClient {
                     stream: _,
                     mut payload,
                 } => match payload.header {
-                    GameMessageHeaders::ClientHello => {
-                        let msg = payload.extract::<ClientHelloMsg>();
-                        if msg.is_err() {
-                            println!(
-                                "⚠️ [Auth] Message ClientHello mal formé : {}",
-                                msg.err().unwrap()
-                            );
-                            continue;
+                    GameMessageHeaders::ClientHello => match payload.extract::<ClientHelloMsg>() {
+                        Ok(msg) => {
+                            self.on_new_client_connected(client_id, quad_tree, shard_manager, msg)
+                                .await;
                         }
-                        let msg = msg.unwrap();
-                        self.on_new_client_connected(client_id, quad_tree, shard_manager, msg)
-                            .await;
-                    }
-                    GameMessageHeaders::FriendHello => {
-                        self.on_server_connected(payload, shard_manager).await;
-                    }
-                    GameMessageHeaders::ChunkHandOff => println!("[Orchestrator] Got ChunkHandOff"),
-                    GameMessageHeaders::Heartbeat => {
-                        let heartbeat = payload.extract::<HeartbeatMessage>();
-                        match heartbeat {
-                            Ok(heartbeat) => {
-                                shard_manager.on_heartbeat_receive(heartbeat.heartbeat.node_id)
-                            }
-                            Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                        Err(e) => {
+                            println!("⚠️ [Auth] Message ClientHello mal formé : {}", e);
                         }
-                    }
+                    },
+                    GameMessageHeaders::FriendHello => match payload.extract::<ServerHelloMSG>() {
+                        Ok(friend) => {
+                            self.on_server_connected(friend, shard_manager).await;
+                        }
+                        Err(e) => {
+                            println!("[DGS] DGS Connected error {}", e)
+                        }
+                    },
+                    GameMessageHeaders::Heartbeat => match payload.extract::<HeartbeatMessage>() {
+                        Ok(heartbeat) => {
+                            shard_manager.on_heartbeat_receive(heartbeat.heartbeat.node_id)
+                        }
+                        Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                    },
                     _ => {}
                 },
             }
@@ -158,21 +149,7 @@ impl BrokerClient {
         );
     }
 
-    async fn on_server_connected(
-        &self,
-        mut payload: GamePayload,
-        shard_manager: &mut ShardManager,
-    ) {
-        let friend = payload.extract::<ServerHelloMSG>();
-        if friend.is_err() {
-            eprintln!(
-                "⚠️ [Spatial] Message FriendHello mal formé : {}",
-                friend.err().unwrap()
-            );
-            return;
-        }
-        let friend = friend.unwrap();
-
+    async fn on_server_connected(&self, friend: ServerHelloMSG, shard_manager: &mut ShardManager) {
         let server_type = friend.server_type;
 
         if server_type == ServerType::Server {
@@ -216,8 +193,8 @@ impl BrokerClient {
 
         self.broker_api.authorize_client(client_id);
 
-        let shard = shard_manager.get_shard_bounds_for_client(client_id);
-        if let Some(dgs_id) = shard {
+        let dgs = shard_manager.get_dgs_for_client(client_id);
+        if let Some(dgs) = dgs {
             let world_size: f32 = env::var("WORLD_SIZE")
                 .expect("Env WORLD_SIZE is not set")
                 .parse()
@@ -239,7 +216,7 @@ impl BrokerClient {
             );
 
             let server_topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
-                .append_id(dgs_id)
+                .append_id(dgs)
                 .build();
 
             // B) Dire au server de faire spawn :

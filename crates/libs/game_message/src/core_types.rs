@@ -4,10 +4,10 @@ use core_types::{GameChunk, Rect};
 
 impl NetWriteTo for Rect {
     fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_f32(self.min_x);
-        buf.put_f32(self.min_y);
-        buf.put_f32(self.max_x);
-        buf.put_f32(self.max_y);
+        buf.put_f32_le(self.min_x);
+        buf.put_f32_le(self.min_y);
+        buf.put_f32_le(self.max_x);
+        buf.put_f32_le(self.max_y);
     }
 }
 
@@ -22,10 +22,10 @@ impl NetWrite for Rect {
 impl NetRead for Rect {
     fn deserialize(data: &mut Bytes) -> Result<Self, String> {
         let rect = Self {
-            min_x: data.get_f32(),
-            min_y: data.get_f32(),
-            max_x: data.get_f32(),
-            max_y: data.get_f32(),
+            min_x: data.get_f32_le(),
+            min_y: data.get_f32_le(),
+            max_x: data.get_f32_le(),
+            max_y: data.get_f32_le(),
         };
 
         Ok(rect)

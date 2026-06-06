@@ -157,7 +157,7 @@ impl ShardManager {
         self.entities.get(&entity_id).cloned()
     }
 
-    pub fn get_shard_bounds_for_client(&self, client_id: NodeId) -> Option<NodeId> {
+    pub fn get_dgs_for_client(&self, client_id: NodeId) -> Option<NodeId> {
         if let Some(shard_id) = self.entities.get(&client_id).cloned() {
             let dgs = self
                 .active_dgs
