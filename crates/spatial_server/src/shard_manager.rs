@@ -1,5 +1,5 @@
 use crate::broker_client::BrokerClient;
-use crate::quadtree::{Entity, QuadTree, ShardId};
+use crate::quadtree::{Entity, ShardId};
 use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,6 +24,18 @@ impl ShardManager {
         }
     }
 
+    pub fn on_heartbeat_receive(&mut self, new_dgs_id: NodeId) {
+        if self.active_dgs.contains_key(&new_dgs_id) {
+            return;
+        }
+
+        if self.dgs_without_shards.contains(&new_dgs_id) {
+            return;
+        }
+
+        self.on_new_dgs(new_dgs_id);
+    }
+
     pub fn on_new_shard(
         &mut self,
         parent: Option<ShardId>,
@@ -31,6 +43,8 @@ impl ShardManager {
         broker: &BrokerClient,
     ) {
         println!("New Shards : {:?}", shards);
+        broker.spawn_new_dgs();
+
         let mut old_dgs_id = Vec::new();
         if let Some(parent) = parent {
             if let Some((_, dgs)) = self.shards.get(&parent) {
@@ -143,19 +157,18 @@ impl ShardManager {
         self.entities.get(&entity_id).cloned()
     }
 
-    pub fn get_shard_bounds_for_client(
-        &self,
-        client_id: NodeId,
-        quad_tree: &QuadTree,
-    ) -> Option<(NodeId, Rect)> {
+    pub fn get_shard_bounds_for_client(&self, client_id: NodeId) -> Option<NodeId> {
         if let Some(shard_id) = self.entities.get(&client_id).cloned() {
-            let shard_bounds = quad_tree.get_shard_bounds(&shard_id).unwrap();
-            let (dgs, _) = self
+            let dgs = self
                 .active_dgs
                 .iter()
-                .find(|(_, shards)| shards.contains(&shard_id))
-                .unwrap();
-            return Some((dgs.clone(), shard_bounds));
+                .find(|(_, shards)| shards.contains(&shard_id));
+
+            if let Some((dgs, _)) = dgs {
+                return Some(dgs.clone());
+            } else {
+                println!("Alors la c'est la barba merde on à pas de server pour le client")
+            }
         }
 
         None

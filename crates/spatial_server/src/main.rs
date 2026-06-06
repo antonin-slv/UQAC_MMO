@@ -48,13 +48,6 @@ async fn main() -> Result<()> {
                     }
                     QuadTreeCommand::TryMerge => {
                         quad_tree.try_merge(&mut shard_manager, &broker_client);
-                        println!("======================================");
-                        println!("Active DGS : {:?}", shard_manager.active_dgs);
-                        println!("Shards without DGS : {:?}", shard_manager.shard_without_dgs);
-                        println!(
-                            "DGS without shards : {:?}",
-                            shard_manager.dgs_without_shards
-                        );
 
                         #[cfg(feature = "debug_visual")]
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));

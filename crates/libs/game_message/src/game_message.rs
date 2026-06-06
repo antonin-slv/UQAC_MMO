@@ -2,10 +2,10 @@
 use broker_protocol::broker_topics::Topic;
 use bytes::{BufMut, Bytes, BytesMut};
 
+pub mod core_types;
+pub mod msg_client_server;
 pub mod msg_dgs;
 pub mod msg_servers;
-pub mod msg_client_server;
-pub mod core_types;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,7 @@ pub enum GameMessageHeaders {
     ClientWelcome = 0x08,    //broker to client
     ClientDisconnect = 0x09, //broker to ...
     Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
+    SpawnServer = 0x0C,
 
     FriendHello = 0x0F, //When something that isn't a client says hello.
 
@@ -41,6 +42,7 @@ impl From<u8> for GameMessageHeaders {
             0x09 => GameMessageHeaders::ClientDisconnect,
 
             0x0B => GameMessageHeaders::Heartbeat,
+            0x0C => GameMessageHeaders::SpawnServer,
 
             0x0F => GameMessageHeaders::FriendHello,
 
@@ -91,11 +93,7 @@ impl GamePayload {
         }
     }
 
-    pub fn write_publish_to<T: GameMessage>(
-        buf: &mut BytesMut,
-        topic: &Topic,
-        message: &T,
-    ) {
+    pub fn write_publish_to<T: GameMessage>(buf: &mut BytesMut, topic: &Topic, message: &T) {
         BrokerMessage::write_publish_headers(buf, topic);
 
         buf.put_u16_le(0);

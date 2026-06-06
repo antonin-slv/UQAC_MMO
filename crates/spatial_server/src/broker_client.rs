@@ -5,8 +5,8 @@ use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::{Rect, Vec2, get_chunk_size};
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, SpawnClientMsg};
-use game_message::msg_servers::{ServerHelloMSG, ServerType};
+use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
+use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
 
@@ -101,6 +101,11 @@ impl BrokerClient {
                             .build(),
                         0,
                     );
+
+                    self.broker_api.subscribe(
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build(),
+                        0,
+                    );
                 }
                 ClientNetworkEvent::Connected => {
                     println!("[Server] Connecté au Broker (Still not ready)...");
@@ -129,13 +134,28 @@ impl BrokerClient {
                     GameMessageHeaders::FriendHello => {
                         self.on_server_connected(payload, shard_manager).await;
                     }
-                    GameMessageHeaders::ChunkHandOff => {
-                        println!("[Orchestrator] Got ChunkHandOff");
+                    GameMessageHeaders::ChunkHandOff => println!("[Orchestrator] Got ChunkHandOff"),
+                    GameMessageHeaders::Heartbeat => {
+                        let heartbeat = payload.extract::<HeartbeatMessage>();
+                        match heartbeat {
+                            Ok(heartbeat) => {
+                                shard_manager.on_heartbeat_receive(heartbeat.heartbeat.node_id)
+                            }
+                            Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                        }
                     }
                     _ => {}
                 },
             }
         }
+    }
+
+    pub fn spawn_new_dgs(&self) {
+        let message = SpawnServerMSG { server_count: 4 };
+        self.broker_api.publish_reliable(
+            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build(),
+            &message,
+        );
     }
 
     async fn on_server_connected(
@@ -172,8 +192,8 @@ impl BrokerClient {
         println!("[Orchestrator] On new client connected");
 
         let new_entity_pos = Vec2::new(
-            rand::random_range(-300.0..300.0),
-            rand::random_range(-300.0..300.0),
+            rand::random_range(20.0..300.0),
+            rand::random_range(20.0..300.0),
         );
 
         quad_tree.insert(Entity::new(client_id, new_entity_pos), shard_manager, self);
@@ -196,8 +216,8 @@ impl BrokerClient {
 
         self.broker_api.authorize_client(client_id);
 
-        let shard = shard_manager.get_shard_bounds_for_client(client_id, quad_tree);
-        if let Some((dgs_id, _)) = shard {
+        let shard = shard_manager.get_shard_bounds_for_client(client_id);
+        if let Some(dgs_id) = shard {
             let world_size: f32 = env::var("WORLD_SIZE")
                 .expect("Env WORLD_SIZE is not set")
                 .parse()
