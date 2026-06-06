@@ -1,6 +1,7 @@
 ﻿use crate::broker_topics::{Topic, TopicDefaults};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt;
+use crate::broker_subtopic::TopicPattern;
 
 pub const RELIABLE_STREAM_ID: u16 = 0;
 
@@ -112,11 +113,11 @@ pub enum BrokerMessage {
     },
     BatchSubscribe {
         client_id: NodeId,
-        topics: Vec<Topic>,
+        pattern: TopicPattern,
     },
     BatchUnsubscribe {
         client_id: NodeId,
-        topics: Vec<Topic>,
+        pattern: TopicPattern,
     },
 
     Publish {
@@ -159,7 +160,7 @@ impl BrokerMessage {
         let tl = Topic::topic_length();
         match tag {
             ProtocolTag::Subscribe | ProtocolTag::Unsubscribe => 1 + 4 + tl,
-            ProtocolTag::BatchSubscribe | ProtocolTag::BatchUnsubscribe => 1 + 4 + 1 + tl,
+            ProtocolTag::BatchSubscribe | ProtocolTag::BatchUnsubscribe => 1 + 4 + 1,
             ProtocolTag::Publish => 1 + tl + 2,
             ProtocolTag::Broadcast => 1 + 2,
             ProtocolTag::BroadcastFromClient => 1 + 4 + 2,
@@ -207,26 +208,12 @@ impl BrokerMessage {
             }
             ProtocolTag::BatchSubscribe | ProtocolTag::BatchUnsubscribe => {
                 let client_id = payload.get_u32_le();
-                let topics_count = payload.get_u8() as usize;
-                let mut topics = Vec::with_capacity(topics_count);
+                let pattern = TopicPattern::deserialize(&mut payload)?;
 
-                if topics_count * Topic::topic_length() > payload.len() {
-                    return Err(ProtocolError::BufferTooShort {
-                        expected: min_len + topics_count * Topic::topic_length(),
-                        actual: real_payload_len,
-                        context: "Lecture des topics en batch",
-                    });
-                }
-                for _ in 0..topics_count {
-                    let topic_bytes = payload.split_to(Topic::topic_length());
-                    let mut topic = Topic::default_topic();
-                    topic.copy_from_slice(&topic_bytes);
-                    topics.push(topic);
-                }
                 if tag == ProtocolTag::BatchSubscribe {
-                    Ok(Self::BatchSubscribe { client_id, topics })
+                    Ok(Self::BatchSubscribe { client_id, pattern })
                 } else {
-                    Ok(Self::BatchUnsubscribe { client_id, topics })
+                    Ok(Self::BatchUnsubscribe { client_id, pattern })
                 }
             }
             ProtocolTag::Publish => {
@@ -313,13 +300,10 @@ impl BrokerMessage {
                 buf.put_u32_le(*client_id);
                 buf.put_slice(topic);
             }
-            Self::BatchSubscribe { client_id, topics }
-            | Self::BatchUnsubscribe { client_id, topics } => {
+            Self::BatchSubscribe { client_id, pattern }
+            | Self::BatchUnsubscribe { client_id, pattern } => {
                 buf.put_u32_le(*client_id);
-                buf.put_u8(topics.len() as u8);
-                for topic in topics {
-                    buf.put_slice(topic);
-                }
+                pattern.serialize(buf);
             }
             Self::Publish { topic, payload } => {
                 buf.put_slice(topic);

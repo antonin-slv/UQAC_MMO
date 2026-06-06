@@ -11,8 +11,8 @@ use broker_protocol::broker_topics::{
     Namespace, SecurityDomain, Topic, TopicBuilder, TopicInterface,
 };
 use game_sockets::protocols::QuicBackend;
-use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 use game_sockets::GameStreamReliability::Reliable;
+use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
@@ -205,21 +205,17 @@ impl Broker {
                             eprintln!("[SÉCURITÉ] Accès LECTURE refusé à {}", node_id);
                         }
                     }
-                    BrokerMessage::BatchSubscribe { topics, .. } => {
-                        for topic in topics {
-                            if topic.security_domain()
-                                == Some(SecurityDomain::PublicReadPrivateWrite)
-                            {
-                                self.node_subscribe(node_id, topic);
-                            } else {
-                                eprintln!("[SÉCURITÉ] Accès LECTURE refusé à {}", node_id);
-                            }
-                        }
+                    BrokerMessage::BatchSubscribe { .. } => {
+                        println!(
+                            "[RÉSEAU PUBLIC] Client {} abonnement batch. REFUSE",
+                            node_id
+                        );
                     }
-                    BrokerMessage::BatchUnsubscribe { topics, .. } => {
-                        for topic in topics {
-                            self.node_unsubscribe(node_id, topic);
-                        }
+                    BrokerMessage::BatchUnsubscribe { .. } => {
+                        println!(
+                            "[RÉSEAU PUBLIC] Client {} désinscription batch. REFUSE",
+                            node_id
+                        );
                     }
                     BrokerMessage::Unsubscribe { topic, .. } => {
                         self.node_unsubscribe(node_id, topic);
@@ -333,17 +329,17 @@ impl Broker {
                         let target_id = if client_id == 0 { node_id } else { client_id };
                         self.node_unsubscribe(target_id, topic);
                     }
-                    BrokerMessage::BatchSubscribe { client_id, topics } => {
+                    BrokerMessage::BatchSubscribe { client_id, pattern } => {
                         let target_id = if client_id == 0 { node_id } else { client_id };
-                        for topic in topics {
+                        pattern.unpack_into(|topic| {
                             self.node_subscribe(target_id, topic);
-                        }
+                        });
                     }
-                    BrokerMessage::BatchUnsubscribe { client_id, topics } => {
+                    BrokerMessage::BatchUnsubscribe { client_id, pattern } => {
                         let target_id = if client_id == 0 { node_id } else { client_id };
-                        for topic in topics {
+                        pattern.unpack_into(|topic| {
                             self.node_unsubscribe(target_id, topic);
-                        }
+                        });
                     }
                     BrokerMessage::Publish { topic, payload } => {
                         // Les serveurs sont dignes de confiance. On forward ce qu'ils ont pré-packagé

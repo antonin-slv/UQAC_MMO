@@ -199,8 +199,8 @@ async fn listen_broker(
             ClientNetworkEvent::Connected => {
                 println!("[Orchestrator] Connected (waiting to be ready)");
             }
-            ClientNetworkEvent::Disconnected(NodeID) => {
-                if NodeID == 0 || NodeID == broker_api.node_id.unwrap_or(NodeID) {
+            ClientNetworkEvent::Disconnected(node_id) => {
+                if node_id == 0 || node_id == broker_api.node_id.unwrap_or(node_id) {
                     println!(
                         "❌ [Spatial/Auth] Perte de connexion au Broker ! Tentative de reconnexion dans 1s..."
                     );

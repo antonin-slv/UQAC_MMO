@@ -113,8 +113,8 @@ fn network_bridge_system(
             },
 
             // ÉTAPE 3 : Déconnexion
-            ClientNetworkEvent::Disconnected(nodeID) => {
-                if nodeID != 0 && local_player.net_id != nodeID {
+            ClientNetworkEvent::Disconnected(node_id) => {
+                if node_id != 0 && local_player.net_id != node_id {
                     continue;
                 }
                 println!("[Client] Déconnecté du serveur.");

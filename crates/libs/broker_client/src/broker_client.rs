@@ -1,4 +1,5 @@
 ﻿use broker_protocol::broker_message::{BrokerMessage, NodeId, RELIABLE_STREAM_ID};
+use broker_protocol::broker_subtopic::TopicPattern;
 use broker_protocol::broker_topics::Topic;
 use bytes::{Buf, BytesMut};
 use game_message::{GameMessage, GameMessageHeaders, GamePayload};
@@ -213,6 +214,24 @@ impl MmoNetworkClient {
             client_id: target_client,
             topic,
         };
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
+    }
+
+    pub fn batch_subscribe(&self, pattern: TopicPattern, target_client: NodeId) {
+        let msg = BrokerMessage::BatchSubscribe {
+            client_id: target_client,
+            pattern,
+        };
+
+        self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
+    }
+
+    pub fn batch_unsubscribe(&self, pattern: TopicPattern, target_client: NodeId) {
+        let msg = BrokerMessage::BatchUnsubscribe {
+            client_id: target_client,
+            pattern,
+        };
+
         self.inefficient_send_but_nice_looking(&self.stream_reliable, msg);
     }
 

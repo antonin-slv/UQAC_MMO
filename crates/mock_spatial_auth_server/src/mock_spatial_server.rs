@@ -1,16 +1,19 @@
 ﻿use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
+    Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION
+    ,
 };
 use game_message::GameMessageHeaders;
 
 use broker_protocol::broker_message::NodeId;
-use core_types::GameChunk;
+use broker_protocol::broker_subtopic::TopicPattern;
+use core_types::chunks::GameChunk;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{SpawnClientMsg, TakeChunkMessage};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use std::time::Duration;
+
 pub async fn run_spatial_auth_server() {
     println!("🌍 [Spatial/Auth] Démarrage du Cerveau Central...");
 
@@ -57,8 +60,8 @@ pub async fn run_spatial_auth_server() {
                 ClientNetworkEvent::Connected => {
                     println!("🌍 [Spatial/Auth] Connecté au Broker (Still not ready)...");
                 }
-                ClientNetworkEvent::Disconnected(nodeID) => {
-                    if nodeID == 0 || nodeID == broker_api.node_id.unwrap_or(nodeID) {
+                ClientNetworkEvent::Disconnected(node_id) => {
+                    if node_id == 0 || node_id == broker_api.node_id.unwrap_or(node_id) {
                         println!(
                             "❌ [Spatial/Auth] Perte de connexion au Broker ! Tentative de reconnexion dans 1s..."
                         );
@@ -66,11 +69,12 @@ pub async fn run_spatial_auth_server() {
                         tokio::time::sleep(Duration::from_secs(1)).await;
 
                         let _ = broker_api.connect(host_adress.as_ref(), broker_private_port);
-                    } else if let Some(removed_dgs) =  active_dgs.iter().position(|&id| id == nodeID) {
-                        println!("🗺️ [Spatial] DGS déconnecté : {}", nodeID);
+                    } else if let Some(removed_dgs) =
+                        active_dgs.iter().position(|&id| id == node_id)
+                    {
+                        println!("🗺️ [Spatial] DGS déconnecté : {}", node_id);
                         active_dgs.remove(removed_dgs);
                     }
-
                 }
                 ClientNetworkEvent::DataReceived {
                     client_id,
@@ -116,6 +120,15 @@ pub async fn run_spatial_auth_server() {
                                         "🗺️ [Spatial] Ordre 'Prends le Chunk 0:0' envoyé au DGS."
                                     );
                                 }
+                                broker_api.subscribe(topic, 0);
+
+                                //
+                                let pattern = TopicPattern::new()
+                                    .with_head(Namespace::Chunk, SecurityDomain::PrivateRW)
+                                    .with_range(0u8..=10u8) // Exemple de range pour les chunks
+                                    .with_range(0u8..=10u8);
+
+                                broker_api.batch_subscribe(pattern, 0);
                             } else {
                                 let server_name = match server_type {
                                     ServerType::Client => "client",

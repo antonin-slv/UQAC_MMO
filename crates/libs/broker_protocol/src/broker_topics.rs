@@ -1,4 +1,4 @@
-﻿use core_types::GameChunk;
+﻿use core_types::chunks::GameChunk;
 
 pub const AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION: Namespace = Namespace::ClientAuth;
 
@@ -61,7 +61,6 @@ impl TryFrom<u8> for Namespace {
     }
 }
 
-//la même chose mais en correcte :
 pub trait TopicInterface {
     fn security_domain(&self) -> Option<SecurityDomain>;
 
@@ -72,6 +71,7 @@ pub type Topic = [u8; TOPIC_LENGTH as usize];
 pub trait TopicDefaults {
     fn default_topic() -> Self;
     fn topic_length() -> usize;
+    fn security_namespace_as_u8(domain: SecurityDomain, namespace: Namespace) -> u8;
 }
 impl TopicDefaults for Topic {
     fn default_topic() -> Self {
@@ -80,7 +80,12 @@ impl TopicDefaults for Topic {
     fn topic_length() -> usize {
         TOPIC_LENGTH as usize
     }
+
+    fn security_namespace_as_u8(domain: SecurityDomain, namespace: Namespace) -> u8 {
+        ((domain as u8) << 6) | ((namespace as u8) & 0b00111111)
+    }
 }
+
 const TOPIC_LENGTH: u8 = 16;
 impl TopicInterface for Topic {
     fn security_domain(&self) -> Option<SecurityDomain> {
@@ -94,19 +99,29 @@ impl TopicInterface for Topic {
     }
 }
 
-// --- Le Builder pour créer des topics sans erreur ---
 #[derive(Debug, Clone)]
 pub struct TopicBuilder {
     buffer: Topic,
     cursor: usize,
+    error: Option<&'static str>,
+}
+
+impl Default for TopicBuilder {
+    fn default() -> Self {
+        Self {
+            buffer: Topic::default_topic(),
+            cursor: 0,
+            error: None,
+        }
+    }
 }
 
 impl TopicBuilder {
     pub fn new(domain: SecurityDomain, namespace: Namespace) -> Self {
-        let first_byte = ((domain as u8) << 6) | ((namespace as u8) & 0b00111111);
-        let mut buffer = [0u8; 16];
+        let first_byte = Topic::security_namespace_as_u8(domain, namespace);
+        let mut buffer = Topic::default_topic();
         buffer[0] = first_byte;
-        Self { buffer, cursor: 1 } // On a écrit le premier octet
+        Self { buffer, cursor: 1, error : None } // On a écrit le premier octet
     }
 
     pub fn append_chunk(mut self, p0: &GameChunk) -> Self {
@@ -117,6 +132,12 @@ impl TopicBuilder {
         self.cursor = pos + 2;
         self
     }
+    pub fn append_u8(mut self, num: u8) -> Self {
+        self.buffer[self.cursor + num as usize] = num;
+        self.cursor += 1;
+        self
+    }
+
     pub fn append_id(mut self, entity: u32) -> Self {
         // Écriture directe sans allocation dynamique
         let bytes = entity.to_le_bytes();
@@ -140,10 +161,23 @@ impl TopicBuilder {
         self.buffer
     }
 
+    pub fn safe_build(self) -> Result<Topic, &'static str> {
+        if let Some(err) = self.error {
+            Err(err)
+        } else {
+            Ok(self.buffer)
+        }
+    }
+
     pub fn append(mut self, sub_topic: &[u8]) -> Self {
+        if self.error.is_some() {
+            return self;
+        }
+
         let slice_len = sub_topic.len();
         if self.cursor + slice_len > self.buffer.len() {
-            panic!("Sub-topic trop long pour le buffer de topic !");
+            self.error = Some("Sub-topic trop long : dépassement des 16 octets du buffer");
+            return self;
         }
         self.buffer[self.cursor..self.cursor + slice_len].copy_from_slice(sub_topic);
         self.cursor += slice_len;

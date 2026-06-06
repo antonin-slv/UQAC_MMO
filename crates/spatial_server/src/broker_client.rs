@@ -3,12 +3,13 @@ use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::broker_topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::{Rect, Vec2, get_chunk_size};
+use core_types::{Rect, Vec2};
 use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
 use std::env;
+use core_types::chunks::get_chunk_size;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
