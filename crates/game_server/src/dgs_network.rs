@@ -191,7 +191,7 @@ fn send_heartbeat_system(
     if timer.timer.just_finished() {
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
-            node_id: broker.client.node_id.unwrap(),
+            node_id: broker.client.node_id.unwrap_or(0),
             zone: server_info.zone.clone(),
             player_count: client_directory.sessions.len(),
             max_players: server_info.max_players,
