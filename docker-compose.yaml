@@ -112,19 +112,19 @@ services:
     container_name: broker
     networks:
       - mmo_network
-  spatial_server:
-    build:
-      context: .
-      dockerfile: crates/spatial_server/Dockerfile
-    image: spatial-server
-    env_file:
-      - .env
-    ports:
-      - "3634:3634/udp"
-    restart: always
-    container_name: spatial_server
-    networks:
-      - mmo_network
+  #spatial_server:
+  #  build:
+  #    context: .
+  #    dockerfile: crates/spatial_server/Dockerfile
+  #  image: spatial-server
+  #  env_file:
+  #    - .env
+  #  ports:
+  #    - "3634:3634/udp"
+  #  restart: always
+  #  container_name: spatial_server
+  #  networks:
+  #    - mmo_network
   #mock_spatial_auth_server:
   #  build:
   #    context: .

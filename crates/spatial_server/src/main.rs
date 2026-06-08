@@ -1,5 +1,5 @@
 #[cfg(feature = "debug_visual")]
-use crate::bevy_renderer::start_renderer;
+use crate::bevy_renderer::bevy_renderer::start_renderer;
 use crate::broker_client::BrokerClient;
 use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
@@ -59,10 +59,6 @@ async fn main() -> Result<()> {
                                 );
                             }
                         }
-                        println!("Active DGS : {:?}", shard_manager.active_dgs);
-                        println!("Shards : {:?}", shard_manager.shards);
-                        println!("Shard without dgs : {:?}", shard_manager.shard_without_dgs);
-                        println!("DGS without shard : {:?}", shard_manager.dgs_without_shards);
 
                         #[cfg(feature = "debug_visual")]
                         let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));

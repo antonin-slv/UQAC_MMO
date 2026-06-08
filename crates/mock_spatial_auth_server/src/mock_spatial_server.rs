@@ -1,7 +1,6 @@
 ﻿use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::topics::{
-    Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION
-    ,
+    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
 };
 use game_message::GameMessageHeaders;
 

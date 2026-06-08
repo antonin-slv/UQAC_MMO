@@ -118,8 +118,9 @@ impl QuadTree {
             if let Some((sub_shard_bounds, is_leaf)) = sub_shard {
                 if is_leaf {
                     shard_manager.on_new_shard(
-                        Some(parent.clone()),
-                        vec![(new_shard.clone(), sub_shard_bounds)],
+                        parent.clone(),
+                        new_shard.clone(),
+                        sub_shard_bounds,
                         broker,
                     );
                 }
@@ -153,7 +154,8 @@ impl QuadTree {
         if shard_manager.count_entity_in_shard(self.shard_id) > self.subdivide_threshold
             && self.depth < self.max_depth
         {
-            self.subdivide(shard_manager);
+            let result = self.subdivide(shard_manager);
+            subdivided_shards.extend(result);
         }
 
         (true, subdivided_shards)

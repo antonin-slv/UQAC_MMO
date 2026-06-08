@@ -1,15 +1,17 @@
 use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_message::NodeId;
+use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::{Rect, Vec2};
-use game_message::GameMessageHeaders;
-use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
-use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
-use std::env;
 use core_types::chunks::get_chunk_size;
+use core_types::{Rect, Vec2};
+use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
+use game_message::msg_dgs::{
+    ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage,
+};
+use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::GameMessageHeaders;
+use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
@@ -92,6 +94,11 @@ impl BrokerClient {
                     );
 
                     self.broker_api.subscribe(
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientAuth).build(),
+                        0,
+                    );
+
+                    self.broker_api.subscribe(
                         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                             .build(),
                         0,
@@ -106,10 +113,17 @@ impl BrokerClient {
                     println!("[Server] Connecté au Broker (Still not ready)...");
                 }
                 ClientNetworkEvent::Disconnected(removed_node_id) => {
+                    println!("On disconnrction");
                     match self.broker_api.node_id {
                         Some(node_id) => {
                             if node_id == removed_node_id {
                                 panic!("Disconnected from broker (this is bad)");
+                            } else {
+                                if removed_node_id.is_server() {
+                                    shard_manager.on_dgs_stopped(removed_node_id);
+                                } else if removed_node_id.is_client() {
+                                    shard_manager.on_client_disconnected(removed_node_id);
+                                }
                             }
                         }
                         None => {
@@ -151,8 +165,10 @@ impl BrokerClient {
         }
     }
 
-    pub fn spawn_new_dgs(&self) {
-        let message = SpawnServerMSG { server_count: 4 };
+    pub fn spawn_new_dgs(&self, server_count: usize) {
+        let message = SpawnServerMSG {
+            server_count: server_count as u8,
+        };
         self.broker_api.publish_reliable(
             TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build(),
             &message,
@@ -249,9 +265,29 @@ impl BrokerClient {
     }
 
     pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<Rect>, old_dgs_ids: Vec<NodeId>) {
+        println!("Assign areas {:?} to DGS {}", areas, dgs_id);
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
+
+        for area in areas.iter() {
+            let world_size: f32 = env::var("WORLD_SIZE")
+                .expect("Env WORLD_SIZE is not set")
+                .parse()
+                .expect("Env WORLD_SIZE is not a number");
+            let max_depth = env::var("QUADTREE_MAX_DEPTH").unwrap().parse().unwrap();
+
+            let chunk_size = get_chunk_size(world_size, max_depth);
+            for game_chunk in area.get_chunks(chunk_size) {
+                let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                    .append_id(dgs_id)
+                    .build();
+
+                let msg = TakeChunkMessage { game_chunk };
+
+                self.broker_api.publish_reliable(topic, &msg);
+            }
+        }
 
         let chunk_hand_off = ChunkHandOff {
             action: ChunkHandOffAction::ReleaseArea,
