@@ -1,17 +1,21 @@
+pub mod dgs_chunk_plugin;
+mod dgs_network;
 mod events;
 mod game;
-mod dgs_network;
 mod snapshot;
+pub mod dgs_to_dgs_message;
 
+use crate::dgs_chunk_plugin::ChunksAuthorityLogicSet;
+use crate::dgs_network::{NetworkPlugin, NetworkSet};
 use crate::game::GameLogicPlugin;
-use crate::dgs_network::NetworkPlugin;
+use crate::snapshot::SnapshotSet;
 use bevy::app::{App, ScheduleRunnerPlugin};
 use bevy::prelude::*;
 use dotenv::dotenv;
 use std::env;
 use std::time::Duration;
 
-const DEFAULT_SERV_FREQUENCY: u16 = 60;
+const DEFAULT_SERV_FREQUENCY: u16 = 20;
 const SERV_FREQUENCY_ENV_NAME: &str = "SERV_FREQUENCY";
 
 fn main() {
@@ -30,6 +34,8 @@ fn main() {
     };
     println!("[Server] Server frequency: {} Hz", serv_frequency);
 
+
+
     // Lancement de Bevy (Boucle principale)
     App::new()
         .add_plugins(
@@ -40,5 +46,18 @@ fn main() {
         .add_plugins(NetworkPlugin)
         .add_plugins(GameLogicPlugin)
         .add_plugins(snapshot::SnapshotPlugin)
+        .add_plugins(dgs_chunk_plugin::ChunkPlugin)
+        .configure_sets(
+            PreUpdate,
+            (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet).chain(),
+        )
+        .configure_sets(
+            Update,
+            (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet).chain(),
+        )
+        .configure_sets(
+            PostUpdate,
+            (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet, SnapshotSet).chain(),
+        )
         .run();
 }

@@ -6,6 +6,7 @@ pub mod core_types;
 pub mod msg_client_server;
 pub mod msg_dgs;
 pub mod msg_servers;
+pub mod msg_entities;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,17 +15,21 @@ pub enum GameMessageHeaders {
     Snapshot = 0x04,    //the shards broadcast the state of the world
     ClientInput = 0x05, //client to Shard
 
-    ClientHello = 0x06,      //Broker broadcast the client Hello.
-    SpawnClient = 0x07,      //broker tells shard to spawn a client
-    ClientWelcome = 0x08,    //broker to client
-    ClientDisconnect = 0x09, //broker to ...
+    ClientHello = 0x06,      // Client tells Hello
+    ClientWelcome = 0x07,    // Auth to client
+    SpawnClient = 0x08,      // Spatial tells DGS to spawn a client
+    ClientEntitySpawned = 0x09,//DGS tells client it spawned
+
+
     Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
     SpawnServer = 0x0C,
-
     FriendHello = 0x0F, //When something that isn't a client says hello.
+
 
     //inter shard protocol
     ChunkHandOff = 0x10,
+
+    EntityStateTransferHandoff = 0x11, //during an handoff, transfers the hidden data.
 
     DiscardedMessageBecauseYouKnow,
 }
@@ -37,9 +42,9 @@ impl From<u8> for GameMessageHeaders {
             0x05 => GameMessageHeaders::ClientInput,
 
             0x06 => GameMessageHeaders::ClientHello,
-            0x07 => GameMessageHeaders::SpawnClient,
-            0x08 => GameMessageHeaders::ClientWelcome,
-            0x09 => GameMessageHeaders::ClientDisconnect,
+            0x07 => GameMessageHeaders::ClientWelcome,
+            0x08 => GameMessageHeaders::SpawnClient,
+            0x09 => GameMessageHeaders::ClientEntitySpawned,
 
             0x0B => GameMessageHeaders::Heartbeat,
             0x0C => GameMessageHeaders::SpawnServer,
@@ -47,6 +52,7 @@ impl From<u8> for GameMessageHeaders {
             0x0F => GameMessageHeaders::FriendHello,
 
             0x10 => GameMessageHeaders::ChunkHandOff,
+            0x11 => GameMessageHeaders::EntityStateTransferHandoff,
 
             _ => GameMessageHeaders::DiscardedMessageBecauseYouKnow,
         }

@@ -1,14 +1,18 @@
 // server/src/network.rs
 
 use crate::events;
+use crate::events::{EntityStateTransferEvent, SnapshotReceived};
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::broker_message::NodeId;
+use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
-use events::{ChunkAssignedEvent, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
+use events::{ChunkHandOffMessage, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_message::msg_client_server::*;
-use game_message::msg_dgs::{Heartbeat, HeartbeatMessage, SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_dgs::{
+    ChunkHandOff, EntityStateTransferHandoff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
+};
+use game_message::msg_entities::NetworkEntityId;
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -21,23 +25,34 @@ const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
 const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
 
 #[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NetworkId(pub u32);
+pub struct NetworkIdComponent(pub NetworkEntityId);
 
 #[derive(Component)]
 pub struct ControlledBy {
     pub client_id: NodeId,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct NetworkIdGenerator {
-    next_id: u32,
+    next_id: NetworkEntityId,
+    pub server_id: Option<NodeId>,
 }
 
-impl NetworkIdGenerator {
-    pub fn next(&mut self) -> NetworkId {
-        let id = self.next_id;
+impl Iterator for NetworkIdGenerator {
+    type Item = NetworkEntityId;
+    fn next(&mut self) -> Option<Self::Item> {
+        let serv_id = self.server_id?;
         self.next_id += 1;
-        NetworkId(id)
+        Some(((serv_id as u64) << 32) | self.next_id as u64)
+    }
+}
+
+impl Default for NetworkIdGenerator {
+    fn default() -> Self {
+        NetworkIdGenerator {
+            next_id: 0,
+            server_id: None,
+        }
     }
 }
 
@@ -62,6 +77,9 @@ pub struct HeartBeatTimer {
 }
 
 pub struct NetworkPlugin;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct NetworkSet;
 
 impl Plugin for NetworkPlugin {
     fn build(&self, app: &mut App) {
@@ -150,7 +168,7 @@ impl Plugin for NetworkPlugin {
             panic!("Error : Connection To broker failed.");
         }
 
-        app.insert_resource(NetworkIdGenerator::default())
+        app.insert_resource(NetworkIdGenerator::default()) // server_id sera mis à jour après le handshake)
             .insert_resource(BrockerManager {
                 client: broker_client,
             })
@@ -170,10 +188,10 @@ impl Plugin for NetworkPlugin {
         app.add_message::<PlayerConnected>()
             .add_message::<PlayerDisconnected>()
             .add_message::<PlayerInputEvent>()
-            .add_message::<ChunkAssignedEvent>();
+            .add_message::<ChunkHandOffMessage>();
 
-        app.add_systems(PreUpdate, network_bridge_system);
-        app.add_systems(Update, send_heartbeat_system);
+        app.add_systems(PreUpdate, network_bridge_system.in_set(NetworkSet));
+        app.add_systems(Update, send_heartbeat_system.in_set(NetworkSet));
 
         println!("\n[Server] Network plugin initialized.\n");
     }
@@ -207,11 +225,14 @@ fn send_heartbeat_system(
 
 fn network_bridge_system(
     mut broker: ResMut<BrockerManager>,
+    mut net_idgenerator: ResMut<NetworkIdGenerator>,
     mut server_info: ResMut<ServerStats>,
     mut msg_connected: MessageWriter<PlayerConnected>,
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
-    mut msg_chunk_assigned: MessageWriter<ChunkAssignedEvent>,
+    mut msg_chunk_assigned: MessageWriter<ChunkHandOffMessage>,
+    mut msg_state_transfer: MessageWriter<EntityStateTransferEvent>,
+    mut msg_snapshot: MessageWriter<SnapshotReceived>,
 ) {
     let broker_connect = &mut broker.client;
     // On utilise poll() de la nouvelle API
@@ -222,6 +243,7 @@ fn network_bridge_system(
                     panic!("Ready event received but node_id is None");
                 });
                 server_info.server_broker_id = my_id;
+                net_idgenerator.server_id = Some(my_id);
 
                 println!("[Server] Handshake validé. Connecté au Broker PubSub.");
 
@@ -243,6 +265,10 @@ fn network_bridge_system(
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
                         .build();
                 broker_connect.publish_reliable(auth_topic, &msg);
+
+                let client_auth_topic =
+                    TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientAuth).build();
+                broker_connect.subscribe(client_auth_topic, 0);
             }
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
@@ -251,6 +277,14 @@ fn network_bridge_system(
                 if disco_id == server_info.server_broker_id || disco_id == 0 {
                     panic!("Disconnected from broker (this is bad)");
                 }
+
+                if disco_id.is_client() {
+                    msg_disconnected.write(PlayerDisconnected {
+                        client_id: disco_id,
+                    });
+                };
+
+                //todo : serveur d'IA ?
             }
 
             ClientNetworkEvent::DataReceived {
@@ -264,8 +298,9 @@ fn network_bridge_system(
                     client_id,
                     &mut msg_input,
                     &mut msg_connected,
-                    &mut msg_disconnected,
                     &mut msg_chunk_assigned,
+                    &mut msg_state_transfer,
+                    &mut msg_snapshot,
                 );
             }
         }
@@ -275,17 +310,25 @@ fn network_bridge_system(
 /// Gère l'aiguillage des flux de données purs (sans logique de Topic, gérée en amont)
 fn route_message_events(
     mut payload: GamePayload,
-    sender_id: NodeId,
+    broker_sent_sender_id: NodeId,
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
-    msg_disconnected: &mut MessageWriter<PlayerDisconnected>,
-    msg_chunk_assigned: &mut MessageWriter<ChunkAssignedEvent>,
+    msg_chunk_assigned: &mut MessageWriter<ChunkHandOffMessage>,
+    msg_state_transfer: &mut MessageWriter<EntityStateTransferEvent>,
+    msg_snapshot: &mut MessageWriter<SnapshotReceived>,
 ) {
     match payload.header {
         GameMessageHeaders::ClientInput => match payload.extract::<PlayerInputMsg>() {
             Ok(msg) => {
+                let client_id = if broker_sent_sender_id.is_client() {
+                    broker_sent_sender_id
+                } else {
+                    msg.emitter_id
+                };
+
                 msg_input.write(PlayerInputEvent {
-                    client_id: sender_id, // Ou le sender_id du broker !
+                    client_id, // Ou le sender_id du broker !
+                    entity_id: msg.entity_id,
                     input_data: msg.input_data,
                 });
             }
@@ -296,40 +339,47 @@ fn route_message_events(
 
         GameMessageHeaders::SpawnClient => match payload.extract::<SpawnClientMsg>() {
             Ok(msg_input) => {
-                msg_connected.write(PlayerConnected {
-                    client_id: msg_input.client_id,
-                    player_name: msg_input.pseudo.clone(),
-                });
+                msg_connected.write(PlayerConnected { msg: msg_input });
             }
             Err(e) => {
                 println!("[Server] Erreur de parsing du message SpawnClient : {}", e);
             }
         },
 
-        GameMessageHeaders::ClientDisconnect => match payload.extract::<ClientDisconnectedMsg>() {
-            Ok(msg_input) => {
-                msg_disconnected.write(PlayerDisconnected {
-                    client_id: msg_input.client_id,
-                });
-            }
-            Err(e) => {
-                println!(
-                    "[Server] Erreur de parsing du message ClientDisconnect : {}",
-                    e
-                );
-            }
-        },
-
-        GameMessageHeaders::ChunkHandOff => match payload.extract::<TakeChunkMessage>() {
+        GameMessageHeaders::ChunkHandOff => match payload.extract::<ChunkHandOff>() {
             Ok(msg_take_chunk) => {
-                msg_chunk_assigned.write(ChunkAssignedEvent {
-                    chunk: msg_take_chunk.game_chunk,
+                msg_chunk_assigned.write(ChunkHandOffMessage {
+                    message: msg_take_chunk,
                 });
             }
+
             Err(e) => {
                 println!("[Server] Erreur de parsing du message TakeChunk : {}", e);
             }
         },
+
+        GameMessageHeaders::EntityStateTransferHandoff => {
+            match payload.extract::<EntityStateTransferHandoff>() {
+                Ok(msg) => {
+                    msg_state_transfer.write(EntityStateTransferEvent { message: msg });
+                }
+                Err(e) => {
+                    println!("[Server] Parsing Error EntityStateTransferHandoff : {}", e);
+                }
+            }
+        }
+
+        GameMessageHeaders::Snapshot => match payload.extract::<SnapshotMsg>() {
+            Ok(msg) => {
+                msg_snapshot.write(SnapshotReceived {
+                    snapshot: msg.snapshot,
+                });
+            }
+            Err(e) => {
+                println!("[Server] Erreur de parsing du message Snapshot : {}", e);
+            }
+        },
+
         _ => {
             println!(
                 "[Server] Unrecognized message header received: {:?} (raw: {:?})",

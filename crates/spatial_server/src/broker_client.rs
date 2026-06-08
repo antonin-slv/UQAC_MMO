@@ -3,13 +3,13 @@ use crate::shard_manager::ShardManager;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::NodeId;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
-use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::GameMessageHeaders;
 use std::env;
-use core_types::chunks::get_chunk_size;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 
@@ -237,7 +237,11 @@ impl BrokerClient {
             };
 
             self.broker_api.publish_reliable(server_topic, &msg);
-            let msg = ClientWelcomeMsg { client_id, chunk };
+            let msg = ClientWelcomeMsg {
+                client_id,
+                chunk,
+                chunk_size,
+            };
             let client_topic =
                 TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::NodeLine)
                     .append_id(client_id)

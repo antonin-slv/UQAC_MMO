@@ -1,18 +1,18 @@
+use crate::core_types::SerializedGameChunkAera;
+use crate::{
+    impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo,
+};
 use bitcode::{Decode, Encode};
-use crate::{impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::{Rect};
 use core_types::chunks::GameChunk;
-
-pub struct TakeChunkMessage {
-    pub game_chunk: GameChunk,
-}
+use core_types::Rect;
 
 pub enum ChunkHandOffAction {
-    TakeArea,
-    AreaTook,
-    ReleaseArea,
+    TakeArea,    //asks a DGS to take a specific area from N someone
+    ReadyToTake, //  this DGS tells another DGS : I'll take that (he answers with 1 serialisation of everything)
+    AreaTook,    //A DGS tells to another DGS : I be ready. Do one last broadcast and then stop.
+    ReleaseArea, // NOT IMPLEMENTED YET (TODOWHAT ?)
 }
 
 impl NetWrite for ChunkHandOffAction {
@@ -27,8 +27,9 @@ impl NetWriteTo for ChunkHandOffAction {
     fn write_to(&self, buf: &mut BytesMut) {
         buf.put_u8(match self {
             ChunkHandOffAction::TakeArea => 0u8,
-            ChunkHandOffAction::AreaTook => 1u8,
-            ChunkHandOffAction::ReleaseArea => 2u8,
+            ChunkHandOffAction::ReadyToTake => 1u8,
+            ChunkHandOffAction::AreaTook => 2u8,
+            ChunkHandOffAction::ReleaseArea => 3u8,
         });
     }
 }
@@ -47,7 +48,7 @@ impl NetRead for ChunkHandOffAction {
 
 pub struct ChunkHandOff {
     pub action: ChunkHandOffAction,
-    pub old_dgs_ids: Vec<NodeId>,
+    pub old_dgs_ids: Vec<NodeId>, //à chaque fois on a Server -> Server (A prend de B, A envois à B) old_dgs_ids == A.
     pub areas: Vec<Rect>,
 }
 
@@ -108,35 +109,6 @@ impl NetRead for ChunkHandOff {
                 })
             }
             Err(e) => Err(format!("ChunkHandOffType : {}", e)),
-        }
-    }
-}
-
-impl NetWriteTo for TakeChunkMessage {
-    fn write_to(&self, buf: &mut BytesMut) {
-        self.game_chunk.write_to(buf);
-    }
-}
-
-impl GameMessage for TakeChunkMessage {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::ChunkHandOff
-    }
-}
-
-impl NetWrite for TakeChunkMessage {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(4);
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for TakeChunkMessage {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        match GameChunk::deserialize(data) {
-            Ok(game_chunk) => Ok(Self { game_chunk }),
-            Err(e) => Err(format!("TakeChunkMessage : {}", e)),
         }
     }
 }
@@ -220,3 +192,16 @@ impl NetRead for SpawnClientMsg {
         })
     }
 }
+
+#[derive(Debug, Decode, Encode, Clone)]
+pub struct EntityStateTransferHandoff {
+    pub entity_handoff : bool,
+    pub chunk_handoff : bool,
+    pub origin_aera: SerializedGameChunkAera,
+    pub data: Vec<Vec<u8>>, //géré directement par les DGS
+}
+
+impl_bitcode_net_message!(
+    EntityStateTransferHandoff,
+    GameMessageHeaders::EntityStateTransferHandoff
+);
