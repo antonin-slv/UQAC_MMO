@@ -66,9 +66,13 @@ fn handle_snapshot_received(
 ) {
     for snp_msg in snapshot_messages.read() {
         for entity in snp_msg.snapshot.entities.iter() {
-            if let Some(current_entity) = client_directory.sessions.get(&entity.owner_id) {
-                for current_entity in current_entity {
-                    if let Ok((mut transform, auth)) = entity_query.get_mut(current_entity.0) {
+            if let Some(current_entities_of_node) = client_directory.sessions.get(&entity.owner_id)
+            {
+                if let Some(node_current_entity) = current_entities_of_node
+                    .iter()
+                    .find(|(_, net_id)| *net_id == entity.network_id)
+                {
+                    if let Ok((mut transform, auth)) = entity_query.get_mut(node_current_entity.0) {
                         if *auth == Authority::Authoritative {
                             continue;
                         }
