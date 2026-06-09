@@ -1,6 +1,6 @@
 ﻿use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, Namespace, SecurityDomain, TopicBuilder,
+    Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
 };
 use game_message::GameMessageHeaders;
 
@@ -8,7 +8,7 @@ use broker_protocol::broker_message::NodeId;
 use broker_protocol::topic_patterns::TopicPattern;
 use core_types::chunks::GameChunk;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg};
-use game_message::msg_dgs::{SpawnClientMsg, TakeChunkMessage};
+use game_message::msg_dgs::SpawnClientMsg;
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use std::env;
 use std::time::Duration;
@@ -108,7 +108,7 @@ pub async fn run_spatial_auth_server() {
                                 )
                                 .append_id(dgs_net_id)
                                 .build();
-
+                                /*
                                 if active_dgs.len() == 1 {
                                     let msg = TakeChunkMessage {
                                         game_chunk: GameChunk { x: 0, y: 0 },
@@ -118,7 +118,7 @@ pub async fn run_spatial_auth_server() {
                                     println!(
                                         "🗺️ [Spatial] Ordre 'Prends le Chunk 0:0' envoyé au DGS."
                                     );
-                                }
+                                } */
                                 broker_api.subscribe(topic, 0);
 
                                 //
@@ -208,7 +208,7 @@ pub async fn run_spatial_auth_server() {
 
                             broker_api.publish_reliable(server_topic, &msg);
 
-                            let msg = ClientWelcomeMsg { client_id, chunk };
+                            let msg = ClientWelcomeMsg { client_id, chunk, chunk_size : 0.0 };
                             let client_topic = TopicBuilder::new(
                                 SecurityDomain::PublicReadPrivateWrite,
                                 Namespace::NodeLine,

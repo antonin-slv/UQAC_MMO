@@ -1,4 +1,4 @@
-use crate::chunks::GameChunk;
+use crate::chunks::{GameChunk, GameChunkAera};
 
 pub mod chunks;
 
@@ -8,17 +8,20 @@ pub struct Vec2 {
     pub y: f32,
 }
 
-
 impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
     pub fn get_chunk(&self, chunk_size: f32) -> GameChunk {
-        GameChunk {
-            x: (self.x / chunk_size).floor() as i16,
-            y: (self.y / chunk_size).floor() as i16,
-        }
+        get_chunk(self.x, self.y, chunk_size)
+    }
+}
+
+pub fn get_chunk(x: f32, y: f32, chunk_size: f32) -> GameChunk {
+    GameChunk {
+        x: (x / chunk_size).floor() as i16,
+        y: (y / chunk_size).floor() as i16,
     }
 }
 
@@ -86,5 +89,16 @@ impl Rect {
         }
         chunks
     }
-}
 
+    pub fn as_chunk_aera(&self, chunk_size: f32) -> GameChunkAera {
+        let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
+        let chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+
+        GameChunkAera {
+            x_min: chunk_min.x,
+            x_max: chunk_max.x,
+            y_min: chunk_min.y,
+            y_max: chunk_max.y,
+        }
+    }
+}

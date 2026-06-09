@@ -35,10 +35,12 @@ pub enum Namespace {
     ServerConnection = 0x04, // when a server connects he tells it here.
     ClientAuth = 0x05,       // client to server auth
     Chunk = 0x06,            // event linked to a specifi chunk + localisation
+    ChunkEntityHandOff = 0x07,//When the Auth of the entity is sent to the targetChunk.
     SpatialInput = 0x11,     // Réception des inputs (lié à un chunk)
     SpatialServer = 0x12,    // Réception des inputs (lié à un chunk)
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
+
 
     NodeLine = 0x32, // Direct comm to a Node
 }
@@ -50,6 +52,7 @@ impl TryFrom<u8> for Namespace {
             0x04 => Ok(Self::ServerConnection),
             0x05 => Ok(Self::ClientAuth),
             0x06 => Ok(Self::Chunk),
+            0x07 => Ok(Self::ChunkEntityHandOff),
             0x11 => Ok(Self::SpatialInput),
             0x12 => Ok(Self::SpatialServer),
             0x30 => Ok(Self::Director),

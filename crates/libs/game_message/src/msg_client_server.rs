@@ -1,7 +1,10 @@
 ﻿// -- les différents streams de données
 
+use crate::msg_entities::NetworkEntityId;
+use crate::{
+    impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo,
+};
 use bitcode::{Decode, Encode};
-use crate::{impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::GameChunk;
@@ -13,7 +16,8 @@ pub type Input = [u8; 16];
 
 #[derive(Encode, Decode, Copy, Clone, Debug)]
 pub struct EntitySnapshot {
-    pub network_id: NodeId,
+    pub network_id: NetworkEntityId,
+    pub owner_id: NodeId,
     pub position: [f32; 2],
 }
 
@@ -32,47 +36,6 @@ impl_bitcode_net_message!(SnapshotMsg, GameMessageHeaders::Snapshot);
 #[derive(Encode, Decode, Clone, Debug, Default, PartialEq)]
 pub struct PlayerInput(pub u16);
 
-pub struct PlayerInputMsg {
-    pub client_id: NodeId,
-    pub input_data: PlayerInput,
-}
-
-impl GameMessage for PlayerInputMsg {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::ClientInput
-    }
-}
-impl NetWriteTo for PlayerInputMsg {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_u32_le(self.client_id);
-        buf.put_u16_le(self.input_data.0); // On écrit directement le u16 !
-    }
-}
-impl NetWrite for PlayerInputMsg {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(6);
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for PlayerInputMsg {
-    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
-        if bytes.remaining() < 6 {
-            return Err(format!(
-                "PlayerInputMsg doit faire 6 octets, reste {}",
-                bytes.remaining()
-            ));
-        }
-        let client_id = bytes.get_u32_le();
-        let input_data = PlayerInput(bytes.get_u16_le());
-
-        Ok(Self {
-            client_id,
-            input_data,
-        })
-    }
-}
 impl PlayerInput {
     pub fn make_from_u8_slice(slice: &[u8]) -> Option<Self> {
         if slice.len() != 2 {
@@ -123,42 +86,19 @@ impl PlayerInput {
     }
 }
 
-pub struct ClientDisconnectedMsg {
-    pub client_id: u32,
+#[derive(Encode, Decode, Clone, Debug, Default, PartialEq)]
+pub struct PlayerInputMsg {
+    pub emitter_id: NodeId,
+    pub entity_id: NetworkEntityId,
+    pub input_data: PlayerInput,
 }
 
-impl NetWriteTo for ClientDisconnectedMsg {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_u32_le(self.client_id);
-    }
-}
+impl_bitcode_net_message!(PlayerInputMsg, GameMessageHeaders::ClientInput);
 
-impl GameMessage for ClientDisconnectedMsg {
-    fn header() -> GameMessageHeaders {
-        GameMessageHeaders::ClientDisconnect
-    }
-}
-impl NetWrite for ClientDisconnectedMsg {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(4);
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for ClientDisconnectedMsg {
-    fn deserialize(bytes: &mut Bytes) -> Result<Self, String> {
-        if bytes.remaining() < 4 {
-            return Err("ClientDisconnectedMsg trop court".into());
-        }
-        Ok(Self {
-            client_id: bytes.get_u32_le(),
-        })
-    }
-}
 pub struct ClientWelcomeMsg {
-    pub client_id: u32,
+    pub client_id: NodeId,
     pub chunk: GameChunk,
+    pub chunk_size: f32,
 }
 
 impl NetWrite for ClientWelcomeMsg {
@@ -171,9 +111,9 @@ impl NetWrite for ClientWelcomeMsg {
 
 impl NetRead for ClientWelcomeMsg {
     fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        if data.len() != 8 {
+        if data.len() != 12 {
             return Err(format!(
-                "ClientWelcomeMsg doit être de 8 octets, trouvé {}",
+                "ClientWelcomeMsg doit être de 12 octets, trouvé {}",
                 data.len()
             ));
         }
@@ -182,7 +122,12 @@ impl NetRead for ClientWelcomeMsg {
             Ok(chunk) => chunk,
             Err(e) => return Err(format!("ClientWelcomeMsg : {}", e)),
         };
-        Ok(Self { client_id, chunk })
+        let chunk_size = data.get_f32_le();
+        Ok(Self {
+            client_id,
+            chunk,
+            chunk_size,
+        })
     }
 }
 
@@ -190,6 +135,7 @@ impl NetWriteTo for ClientWelcomeMsg {
     fn write_to(&self, buf: &mut BytesMut) {
         buf.put_u32_le(self.client_id);
         self.chunk.write_to(buf);
+        buf.put_f32_le(self.chunk_size);
     }
 }
 
