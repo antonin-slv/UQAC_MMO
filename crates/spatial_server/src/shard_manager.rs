@@ -12,14 +12,8 @@ pub struct Shard {
 }
 
 #[derive(Clone, Debug)]
-pub struct EntityMapping {
-    shard_id: ShardId,
-    client_id: NodeId,
-}
-
-#[derive(Clone, Debug)]
 pub struct ShardManager {
-    pub entities: HashMap<NetworkEntityId, EntityMapping>,
+    pub entities: HashMap<NetworkEntityId, ShardId>,
     pub shards: HashMap<ShardId, Shard>,
     pub active_dgs: HashMap<NodeId, Option<ShardId>>,
 }
@@ -116,7 +110,6 @@ impl ShardManager {
     }
 
     pub fn on_new_dgs(&mut self, dgs_id: NodeId, quad_tree: &QuadTree, broker: &BrokerClient) {
-        println!("On New DGS ! : {:?}", dgs_id);
         let mut shard_available = None;
 
         if let Some((shard_id, shard)) = self
@@ -149,32 +142,38 @@ impl ShardManager {
     }
 
     pub fn on_client_disconnected(&mut self, client_id: NodeId) {
-        println!("Client disconnected : {:?}", client_id);
-        let shard_id = self
-            .entities
-            .iter()
-            .find(|(_, entity_mapping)| client_id == entity_mapping.client_id.clone());
-        if let Some((entity_id, entity_mapping)) = shard_id {
-            println!(
-                "Remove client {} from shard {}",
-                client_id, entity_mapping.shard_id
-            );
-            self.remove_entity_from_shard(entity_mapping.shard_id.clone(), entity_id.clone());
-        } else {
-            println!("No shard found for client : {}", client_id)
-        }
+        //println!("Client disconnected : {:?}", client_id);
+        //let shard_id = self
+        //    .entities
+        //    .iter()
+        //    .find(|(_, entity_mapping)| client_id == entity_mapping.client_id.clone());
+        //if let Some((entity_id, entity_mapping)) = shard_id {
+        //    println!(
+        //        "Remove client {} from shard {}",
+        //        client_id, entity_mapping.shard_id
+        //    );
+        //    self.remove_entity_from_shard(entity_mapping.shard_id.clone(), entity_id.clone());
+        //} else {
+        //    println!("No shard found for client : {}", client_id)
+        //}
     }
 
     pub fn set_entity_shard(&mut self, shard_id: ShardId, entity: Entity) {
         let old_shard_id = self.get_shard(entity.id);
+        println!("Entities : {:?}", self.entities);
+        println!(
+            "New Shard iD : {} / Old Shard ID: {:?}",
+            shard_id, old_shard_id
+        );
         if let Some(old_shard_id) = old_shard_id
             && old_shard_id != shard_id
         {
+            println!("Remove from old shard");
             self.remove_entity_from_shard(old_shard_id, entity.id);
         }
-        if let Some(entity_mapping) = self.entities.get_mut(&entity.id) {
-            entity_mapping.shard_id = shard_id;
-        }
+
+        self.entities.insert(entity.id, shard_id);
+
         let shard = self.shards.get_mut(&shard_id);
         if let Some(shard) = shard {
             shard.entities.insert(entity);
@@ -213,10 +212,7 @@ impl ShardManager {
     }
 
     pub fn get_shard(&self, entity_id: NetworkEntityId) -> Option<ShardId> {
-        if let Some(entity) = self.entities.get(&entity_id).cloned() {
-            return Some(entity.shard_id);
-        }
-        None
+        self.entities.get(&entity_id).cloned()
     }
 
     pub fn get_dgs_for_position(&self, position: Vec2, quad_tree: &QuadTree) -> Option<NodeId> {

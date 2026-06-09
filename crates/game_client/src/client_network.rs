@@ -6,9 +6,9 @@ use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::topics::{
-    SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
-};
+use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION};
+use core_types::chunks::GameChunkAera;
+use core_types::get_chunk;
 use game_message::msg_client_server::*;
 use game_message::msg_entities::NetworkEntityId;
 use game_message::GameMessageHeaders;
@@ -42,7 +42,7 @@ impl Plugin for ClientNetworkPlugin {
             )
             .add_systems(
                 Update,
-                process_snapshots.run_if(in_state(ClientState::InGame)),
+                (process_snapshots, what_is_my_chunks).run_if(in_state(ClientState::InGame)),
             );
     }
 }
@@ -196,4 +196,29 @@ fn process_snapshots(
             entity_handle.insert(LocalControlledComponent);
         }
     }
+}
+
+
+fn what_is_my_chunks(
+    broker : Res<NetworkManager>,
+    my_entity : Query<&Transform, With<LocalControlledComponent>>,
+    chunking: Res<Chunking>
+) {
+
+    my_entity.iter().for_each(|transform| {
+        let c_chunk = get_chunk(transform.translation.x, transform.translation.y,  chunking.chunk_size);
+
+        let borders = GameChunkAera::from(c_chunk).get_borders();
+
+        let topic_builder = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite,Namespace::Chunk);
+
+        for border_chunk in borders {
+
+            let topic = topic_builder.clone().append_chunk(&border_chunk).build();
+            broker.client.subscribe(topic, 0);
+
+        }
+
+    })
+
 }

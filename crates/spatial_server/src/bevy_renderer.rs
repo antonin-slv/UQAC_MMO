@@ -45,11 +45,11 @@ pub mod bevy_renderer {
         channels: ResMut<QuadTreeChannelResource>,
         mut snapshot: ResMut<LocalQuadTreeSnapshot>,
     ) {
-        let rx_guard = channels.rx.lock().unwrap();
-
-        while let Ok((new_tree, shard_manager)) = rx_guard.try_recv() {
-            snapshot.quad_tree = Some(new_tree);
-            snapshot.shard_manager = Some(shard_manager);
+        if let Ok(rx_guard) = channels.rx.lock() {
+            while let Ok((new_tree, shard_manager)) = rx_guard.try_recv() {
+                snapshot.quad_tree = Some(new_tree);
+                snapshot.shard_manager = Some(shard_manager);
+            }
         }
     }
 

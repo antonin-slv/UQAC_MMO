@@ -36,6 +36,7 @@ fn main() {
             FixedUpdate,
             capture_inputs.run_if(in_state(ClientState::InGame)),
         )
+        .add_systems(Update, draw_chunks)
         .run();
     //todo : tenter d'envoyer un message de déconnexion (permettra d'un peu limiter la charge serveur) -> soit event soit à la fin de run.
 }
@@ -105,4 +106,18 @@ fn capture_inputs(
             println!("No local entity found");
         }
     };
+}
+
+fn draw_chunks(mut gizmos: Gizmos, chunking: Res<Chunking>) {
+    let start = Isometry2d::new(
+        Vec2::new(chunking.chunk_size, chunking.chunk_size) * 0.5,
+        Rot2::IDENTITY,
+    );
+    let size = Vec2::ONE * chunking.chunk_size;
+    gizmos.rect_2d(
+        start,
+        size,
+        Color::Srgba(Srgba::RED),
+    );
+    println!("{} / {:?} / {}", chunking.chunk_size, start, size);
 }

@@ -4,7 +4,7 @@ use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topic_patterns::TopicPattern;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::chunks::{get_chunk_size};
+use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
 use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, SnapshotMsg};
@@ -217,6 +217,7 @@ impl BrokerClient {
                                         entity_snapshot.position[1],
                                     ),
                                 );
+                                //println!("Entity ID {}", entity_snapshot.network_id);
                                 if let Some(quad_tree) = quad_tree {
                                     quad_tree.insert(entity, shard_manager, self);
                                 }
@@ -268,9 +269,10 @@ impl BrokerClient {
     ) {
         println!("[Orchestrator] On new client connected");
 
-        let count = shard_manager.entities.len();
-
-        let new_entity_pos = Vec2::new(40.0 + (count as f32) * 10.0, 40.0 + (count as f32) * 10.0);
+        let new_entity_pos = Vec2::new(
+            rand::random_range(0.0..self.chunk_size),
+            rand::random_range(0.0..self.chunk_size),
+        );
 
         println!(
             "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",
