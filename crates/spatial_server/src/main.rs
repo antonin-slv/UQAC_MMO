@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
                                     merged_shards,
                                     &broker_client,
                                 );
+                                shard_manager.on_new_shard(None, shard_id, bounds, &broker_client);
                             }
                         }
 

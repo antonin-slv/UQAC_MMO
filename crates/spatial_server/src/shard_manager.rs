@@ -38,7 +38,7 @@ impl ShardManager {
 
     pub fn on_new_shard(
         &mut self,
-        parent: ShardId,
+        parent: Option<ShardId>,
         shard_id: ShardId,
         bounds: Rect,
         broker: &BrokerClient,
@@ -48,7 +48,9 @@ impl ShardManager {
         println!("On new shard ! : {:?}", shard_id);
 
         let mut old_dgs_id = Vec::new();
-        if let Some(shard) = self.shards.get_mut(&parent) {
+        if let Some(parent) = parent
+            && let Some(shard) = self.shards.get_mut(&parent)
+        {
             if let Some(dgs) = shard.dgs {
                 old_dgs_id.push(dgs.clone());
             }
@@ -86,18 +88,22 @@ impl ShardManager {
         broker: &BrokerClient,
     ) {
         for shard_id in shards {
-            if let Some(shard) = self.shards.get(&shard_id)
-                && let Some(dgs) = shard.dgs
-            {
-                let mut old_dgs_ids = Vec::new();
-                if let Some(shard) = self.shards.get(&parent) {
-                    if let Some(dgs) = shard.dgs {
-                        old_dgs_ids.push(dgs.clone());
+            if let Some(shard) = self.shards.get(&shard_id) {
+                if let Some(dgs) = shard.dgs {
+                    let mut old_dgs_ids = Vec::new();
+                    if let Some(shard) = self.shards.get(&parent) {
+                        if let Some(dgs) = shard.dgs {
+                            old_dgs_ids.push(dgs.clone());
+                        }
                     }
-                }
 
-                broker.remove_shard_to_dgs(dgs.clone(), vec![parent_bounds], old_dgs_ids);
+                    self.active_dgs.insert(dgs.clone(), None);
+
+                    broker.remove_shard_to_dgs(dgs.clone(), vec![parent_bounds], old_dgs_ids);
+                }
             }
+
+            self.shards.remove(&shard_id);
         }
     }
 

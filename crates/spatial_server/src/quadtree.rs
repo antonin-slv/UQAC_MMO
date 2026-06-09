@@ -118,7 +118,7 @@ impl QuadTree {
             if let Some((sub_shard_bounds, is_leaf)) = sub_shard {
                 if is_leaf {
                     shard_manager.on_new_shard(
-                        parent.clone(),
+                        Some(parent.clone()),
                         new_shard.clone(),
                         sub_shard_bounds,
                         broker,
