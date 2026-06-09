@@ -35,7 +35,7 @@ pub struct AssignedChunks {
 }
 
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 pub struct ChunkHandOffMessage {
     pub message: ChunkHandOff,
 }
@@ -75,7 +75,7 @@ pub struct EntityStateTransferEvent {
 
 #[derive(Resource, Default)]
 pub struct PendingTransfersForOther {
-    pub aeras: Vec<(GameChunkAera, NodeId)>,
+    pub aeras: Vec<(GameChunkAera, Option<NodeId>)>,
 }
 
 #[derive(Message, Debug)]

@@ -8,3 +8,4 @@ name = "core_types"
 path = "src/math.rs"
 
 [dependencies]
+bitcode = { workspace = true }

@@ -1,7 +1,7 @@
 use crate::broker_client::BrokerClient;
 use crate::shard_manager::ShardManager;
-use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
+use game_message::msg_entities::NetworkEntityId;
 use std::collections::HashMap; // Ajout de l'import
 use std::env;
 use std::hash::{Hash, Hasher};
@@ -10,12 +10,12 @@ pub type ShardId = u32;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
-    pub id: NodeId,
+    pub id: NetworkEntityId,
     pub pos: Vec2,
 }
 
 impl Entity {
-    pub fn new(id: NodeId, pos: Vec2) -> Self {
+    pub fn new(id: NetworkEntityId, pos: Vec2) -> Self {
         Self { id, pos }
     }
 }
@@ -318,5 +318,18 @@ impl QuadTree {
             return Some((self.bounds.clone(), self.children.is_none()));
         }
         None
+    }
+
+    pub fn get_shard_of_point(&self, point: Vec2) -> Option<ShardId> {
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                if child.bounds.contains(point) {
+                    return child.get_shard_of_point(point);
+                }
+            }
+            return None
+        }
+
+        Some(self.shard_id)
     }
 }

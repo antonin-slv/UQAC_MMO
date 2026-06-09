@@ -76,6 +76,7 @@ fn update_and_send_autority_pre_snapshot(
             chunk_handoff: false,
             entity_handoff: true,
             origin_aera: SerializedGameChunkAera::from(GameChunkAera::from(chunk)),
+            old_owner: broker.client.node_id,
             data: vec_of_serialized_entities,
         };
 

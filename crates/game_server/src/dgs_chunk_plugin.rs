@@ -112,6 +112,7 @@ fn handle_snapshot_received(
 */
 
 fn handle_chunks_handoff_message(
+    mut ev_transfer: MessageWriter<EntityStateTransferEvent>,
     mut ev_chunk: MessageReader<events::ChunkHandOffMessage>,
     mut chunk_directory: ResMut<AssignedChunks>,
     broker: ResMut<BrockerManager>,
@@ -125,13 +126,14 @@ fn handle_chunks_handoff_message(
     } = &mut *chunk_directory;
 
     for ev in ev_chunk.read() {
+        println!("Received chunk hand-off event: {:?}", ev);
         match ev.message.action {
             // PHASE 1: Le Director nous dit de prendre une zone
             ChunkHandOffAction::TakeArea => {
-                for i in 0..ev.message.areas.len() {
-                    let aera = ev.message.areas[i].clone();
-                    let old_owner = ev.message.old_dgs_ids[i].clone();
-                    let chunk_aera = aera.as_chunk_aera(*chunk_size);
+                for orig_area in ev.message.areas.iter() {
+                    let (aera, old_owner) = orig_area;
+
+                    let chunk_aera = aera.as_chunk_aera(chunk_size.clone());
 
                     let extended_chunk_aera = GameChunkAera {
                         x_min: chunk_aera.x_min - 1,
@@ -149,11 +151,17 @@ fn handle_chunks_handoff_message(
                         PrivateReadPublicWrite,
                         Namespace::SpatialInput,
                     );
-                    let chunk_data_root =
-                        Topic::security_namespace_as_u8(PublicReadPrivateWrite, Namespace::Chunk);
-                    // On s'abonne pour commencer à écouter (Ghost)
+                    let mut namespaces = vec![input_root];
+
+                    if old_owner.is_some() {
+                        let chunk_data_root =
+                            Topic::security_namespace_as_u8(PublicReadPrivateWrite, Namespace::Chunk);
+                        namespaces.push(chunk_data_root);
+                    }
+
+                    // On s'abonne pour commencer à écoute r (Ghost)
                     let all_subscribes_to_do = TopicPattern::new()
-                        .with_list(vec![input_root, chunk_data_root])
+                        .with_list(namespaces)
                         .with_layers(extended_chunk_aera); //ici on s'abonne directement aux ghost ZONES ET aux zones normales
                     broker.client.batch_subscribe(all_subscribes_to_do, 0);
 
@@ -163,36 +171,47 @@ fn handle_chunks_handoff_message(
                     broker
                         .client
                         .batch_subscribe(chunk_entity_hand_off_topic.clone(), 0);
-                    broker
-                        .client
-                        .batch_unsubscribe(chunk_entity_hand_off_topic, old_owner);
+                    if let Some(old_owner) = old_owner {
+                        broker
+                            .client
+                            .batch_unsubscribe(chunk_entity_hand_off_topic, *old_owner);
 
-                    // On prévient l'ancien propriétaire qu'on est prêt à recevoir les entités
-                    let topic_old_owner =
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
-                            .append_id(old_owner)
-                            .build();
+                        // On prévient l'ancien propriétaire qu'on est prêt à recevoir les entités
+                        let topic_old_owner =
+                            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
+                                .append_id(*old_owner)
+                                .build();
 
-                    let ready_message = ChunkHandOff {
-                        action: ChunkHandOffAction::ReadyToTake,
-                        areas: vec![aera],
-                        old_dgs_ids: vec![old_owner], // On envoie notre ID
-                    };
-                    broker
-                        .client
-                        .publish_reliable(topic_old_owner, &ready_message);
+                        let ready_message = ChunkHandOff {
+                            action: ChunkHandOffAction::ReadyToTake,
+                            areas: vec![(*aera, broker.client.node_id)],
+                        };
+                        broker
+                            .client
+                            .publish_reliable(topic_old_owner, &ready_message);
+                    } else {
+                        let message = EntityStateTransferHandoff {
+                            entity_handoff: false,
+                            chunk_handoff: true,
+                            origin_aera: SerializedGameChunkAera::from(aera.as_chunk_aera(*chunk_size)),
+                            old_owner: old_owner.clone(),
+                            data: vec![],
+                        };
+                        let state_tranfer_event = EntityStateTransferEvent {
+                            message
+                        };
+
+                        ev_transfer.write(state_tranfer_event);
+                    }
                 }
             }
 
             // PHASE 2: Un autre serveur est prêt à prendre notre zone (Nous sommes le Source)
             ChunkHandOffAction::ReadyToTake => {
-                for i in 0..ev.message.areas.len() {
-                    let aera = ev.message.areas[i].clone();
-                    let target_dgs = ev.message.old_dgs_ids[i].clone();
-
+                for (aera, dgs) in ev.message.areas.iter() {
                     pending_transfers
                         .aeras
-                        .push((aera.as_chunk_aera(*chunk_size), target_dgs));
+                        .push((aera.as_chunk_aera(chunk_size.clone()), *dgs));
                 }
             }
             ChunkHandOffAction::AreaTook => { /* Pour le spatial server */ }
@@ -215,7 +234,7 @@ fn handle_state_transfer(
         return;
     }
 
-    let mut taken_aeras: Vec<core_types::Rect> = Vec::new();
+    let mut taken_aeras = Vec::new();
     for ev in ev_transfer.read() {
         let is_chunk_handoff = ev.message.chunk_handoff;
         println!("[Handoff] Réception de l'état des entités. Prise d'autorité absolue.");
@@ -295,7 +314,7 @@ fn handle_state_transfer(
                 chunk_directory.ghost_chunks.remove(&chunk);
                 chunk_directory.assigned_chunks.insert(chunk);
             }
-            taken_aeras.push(orgin_aera.to_core_rect(chunk_directory.chunk_size));
+            taken_aeras.push((orgin_aera.to_core_rect(chunk_directory.chunk_size),ev.message.old_owner));
         }
     }
 
@@ -304,7 +323,6 @@ fn handle_state_transfer(
 
     let handoff_complete_message = &ChunkHandOff {
         action: ChunkHandOffAction::AreaTook,
-        old_dgs_ids: vec![],
         areas: taken_aeras,
     };
     broker
@@ -337,6 +355,12 @@ fn execute_handoff_transfers(
     let mut killed_ghost_chunks: FastSet<GameChunk> = FastSet::default();
 
     for (chunk_aera, target_dgs) in pending_transfers.aeras.drain(..) {
+
+        if target_dgs.is_none() {
+            continue;
+        }
+        let target_dgs = target_dgs.unwrap();
+
         for border_chunk in chunk_aera.get_borders().iter() {
             killed_ghost_chunks.insert(*border_chunk);
         }
@@ -373,6 +397,7 @@ fn execute_handoff_transfers(
             entity_handoff: false,
             chunk_handoff: true,
             origin_aera: SerializedGameChunkAera::from(chunk_aera),
+            old_owner: broker.client.node_id,
             data: transfer_data,
         };
 

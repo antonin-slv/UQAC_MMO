@@ -1,7 +1,8 @@
 use crate::broker_client::BrokerClient;
-use crate::quadtree::{Entity, ShardId};
+use crate::quadtree::{Entity, QuadTree, ShardId};
 use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
+use game_message::msg_entities::NetworkEntityId;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -11,8 +12,14 @@ pub struct Shard {
 }
 
 #[derive(Clone, Debug)]
+pub struct EntityMapping {
+    shard_id: ShardId,
+    client_id: NodeId,
+}
+
+#[derive(Clone, Debug)]
 pub struct ShardManager {
-    pub entities: HashMap<NodeId, ShardId>,
+    pub entities: HashMap<NetworkEntityId, EntityMapping>,
     pub shards: HashMap<ShardId, Shard>,
     pub active_dgs: HashMap<NodeId, Option<ShardId>>,
 }
@@ -26,14 +33,19 @@ impl ShardManager {
         }
     }
 
-    pub fn on_heartbeat_receive(&mut self, new_dgs_id: NodeId) {
-        if let Some(dgs) = self.active_dgs.get(&new_dgs_id)
-            && dgs.is_some()
+    pub fn on_heartbeat_receive(
+        &mut self,
+        new_dgs_id: NodeId,
+        quad_tree: &QuadTree,
+        broker: &BrokerClient,
+    ) {
+        if let Some(shard) = self.active_dgs.get(&new_dgs_id)
+            && shard.is_some()
         {
             return;
         }
 
-        self.on_new_dgs(new_dgs_id);
+        self.on_new_dgs(new_dgs_id, quad_tree, broker);
     }
 
     pub fn on_new_shard(
@@ -47,13 +59,11 @@ impl ShardManager {
 
         println!("On new shard ! : {:?}", shard_id);
 
-        let mut old_dgs_id = Vec::new();
+        let mut old_dgs_id = None;
         if let Some(parent) = parent
             && let Some(shard) = self.shards.get_mut(&parent)
         {
-            if let Some(dgs) = shard.dgs {
-                old_dgs_id.push(dgs.clone());
-            }
+            old_dgs_id = shard.dgs;
         }
 
         println!("Old DGS ID: {:?}", old_dgs_id);
@@ -63,7 +73,7 @@ impl ShardManager {
             .iter_mut()
             .find(|(_, shard)| shard.is_none())
         {
-            broker.assign_shard_to_dgs(new_dgs.clone(), vec![bounds], old_dgs_id.clone());
+            broker.assign_shard_to_dgs(new_dgs.clone(), vec![(bounds, old_dgs_id)]);
             if let Some(shard) = self.shards.get_mut(&shard_id) {
                 shard.dgs = Some(new_dgs.clone());
             }
@@ -90,16 +100,14 @@ impl ShardManager {
         for shard_id in shards {
             if let Some(shard) = self.shards.get(&shard_id) {
                 if let Some(dgs) = shard.dgs {
-                    let mut old_dgs_ids = Vec::new();
+                    let mut old_dgs_id = None;
                     if let Some(shard) = self.shards.get(&parent) {
-                        if let Some(dgs) = shard.dgs {
-                            old_dgs_ids.push(dgs.clone());
-                        }
+                        old_dgs_id = shard.dgs;
                     }
 
                     self.active_dgs.insert(dgs.clone(), None);
 
-                    broker.remove_shard_to_dgs(dgs.clone(), vec![parent_bounds], old_dgs_ids);
+                    broker.remove_shard_to_dgs(dgs.clone(), vec![(parent_bounds, old_dgs_id)]);
                 }
             }
 
@@ -107,7 +115,8 @@ impl ShardManager {
         }
     }
 
-    pub fn on_new_dgs(&mut self, dgs_id: NodeId) {
+    pub fn on_new_dgs(&mut self, dgs_id: NodeId, quad_tree: &QuadTree, broker: &BrokerClient) {
+        println!("On New DGS ! : {:?}", dgs_id);
         let mut shard_available = None;
 
         if let Some((shard_id, shard)) = self
@@ -119,6 +128,11 @@ impl ShardManager {
             shard.dgs = Some(dgs_id);
 
             println!("New DGS assigned: {:?}", shard.dgs);
+            if let Some((bounds, _)) = quad_tree.get_shard_bounds(shard_id) {
+                broker.assign_shard_to_dgs(dgs_id, vec![(bounds, None)]);
+            } else {
+                println!("No bounds found for shard {:?}", shard_id);
+            }
         }
 
         self.active_dgs.insert(dgs_id, shard_available);
@@ -136,10 +150,16 @@ impl ShardManager {
 
     pub fn on_client_disconnected(&mut self, client_id: NodeId) {
         println!("Client disconnected : {:?}", client_id);
-        let shard_id = self.entities.get(&client_id);
-        if let Some(shard) = shard_id {
-            println!("Remove client {} from shard {}", client_id, shard);
-            self.remove_entity_from_shard(shard.clone(), client_id);
+        let shard_id = self
+            .entities
+            .iter()
+            .find(|(_, entity_mapping)| client_id == entity_mapping.client_id.clone());
+        if let Some((entity_id, entity_mapping)) = shard_id {
+            println!(
+                "Remove client {} from shard {}",
+                client_id, entity_mapping.shard_id
+            );
+            self.remove_entity_from_shard(entity_mapping.shard_id.clone(), entity_id.clone());
         } else {
             println!("No shard found for client : {}", client_id)
         }
@@ -152,7 +172,9 @@ impl ShardManager {
         {
             self.remove_entity_from_shard(old_shard_id, entity.id);
         }
-        self.entities.insert(entity.id, shard_id);
+        if let Some(entity_mapping) = self.entities.get_mut(&entity.id) {
+            entity_mapping.shard_id = shard_id;
+        }
         let shard = self.shards.get_mut(&shard_id);
         if let Some(shard) = shard {
             shard.entities.insert(entity);
@@ -169,7 +191,7 @@ impl ShardManager {
         }
     }
 
-    pub fn remove_entity_from_shard(&mut self, shard_id: ShardId, entity_id: NodeId) {
+    pub fn remove_entity_from_shard(&mut self, shard_id: ShardId, entity_id: NetworkEntityId) {
         if let Some(shard) = self.shards.get_mut(&shard_id) {
             shard
                 .entities
@@ -190,15 +212,16 @@ impl ShardManager {
         entities
     }
 
-    pub fn get_shard(&self, entity_id: NodeId) -> Option<u32> {
-        self.entities.get(&entity_id).cloned()
+    pub fn get_shard(&self, entity_id: NetworkEntityId) -> Option<ShardId> {
+        if let Some(entity) = self.entities.get(&entity_id).cloned() {
+            return Some(entity.shard_id);
+        }
+        None
     }
 
-    pub fn get_dgs_for_client(&self, client_id: NodeId) -> Option<NodeId> {
-        if let Some(shard_id) = self.entities.get(&client_id).cloned() {
-            let shard = self.shards.get(&shard_id);
-
-            if let Some(shard) = shard
+    pub fn get_dgs_for_position(&self, position: Vec2, quad_tree: &QuadTree) -> Option<NodeId> {
+        if let Some(shard_id) = quad_tree.get_shard_of_point(position) {
+            if let Some(shard) = self.shards.get(&shard_id)
                 && let Some(dgs) = shard.dgs
             {
                 return Some(dgs);

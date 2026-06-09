@@ -4,35 +4,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::{Rect, Vec2};
 
-impl NetWriteTo for Rect {
-    fn write_to(&self, buf: &mut BytesMut) {
-        buf.put_f32_le(self.min_x);
-        buf.put_f32_le(self.min_y);
-        buf.put_f32_le(self.max_x);
-        buf.put_f32_le(self.max_y);
-    }
-}
 
-impl NetWrite for Rect {
-    fn serialize(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(16);
-        self.write_to(&mut buf);
-        buf.freeze()
-    }
-}
-
-impl NetRead for Rect {
-    fn deserialize(data: &mut Bytes) -> Result<Self, String> {
-        let rect = Self {
-            min_x: data.get_f32_le(),
-            min_y: data.get_f32_le(),
-            max_x: data.get_f32_le(),
-            max_y: data.get_f32_le(),
-        };
-
-        Ok(rect)
-    }
-}
+impl_bitcode_net_message!(Rect, GameMessageHeaders::DiscardedMessageBecauseYouKnow);
 
 impl NetWrite for GameChunk {
     fn serialize(&self) -> Bytes {
