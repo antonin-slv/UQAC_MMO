@@ -3248,11 +3248,13 @@ name = "game_server"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bitcode",
  "broker_client",
  "broker_protocol",
  "core_types",
  "dotenv",
  "game_message",
+ "rustc-hash 2.1.2",
  "uuid",
 ]
 

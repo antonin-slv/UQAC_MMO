@@ -1,6 +1,6 @@
-﻿use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::chunks::{GameChunkAera};
-use crate::broker_message::ProtocolError;
+﻿use crate::broker_message::ProtocolError;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use core_types::chunks::{GameChunk, GameChunkAera};
 
 pub trait IntoTopicLayers {
     fn into_layers(self) -> Vec<TopicLayer>;
@@ -18,6 +18,23 @@ impl IntoTopicLayers for GameChunkAera {
     }
 }
 
+impl<T: IntoTopicLayer> IntoTopicLayers for Vec<T> {
+    fn into_layers(self) -> Vec<TopicLayer> {
+        self.into_iter().map(|item| item.into_layer()).collect()
+    }
+}
+impl IntoTopicLayer for GameChunk {
+    fn into_layer(self) -> TopicLayer {
+        let le_x = self.x.to_le_bytes();
+        let le_y = self.y.to_le_bytes();
+        TopicLayer::Fixed(Vec::from([le_x[0], le_x[1], le_y[0], le_y[1]]))
+    }
+}
+impl IntoTopicLayer for &GameChunk {
+    fn into_layer(self) -> TopicLayer {
+        (*self).into_layer()
+    }
+}
 
 //CLASS DEFINITIONS
 

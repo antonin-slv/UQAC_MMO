@@ -1,10 +1,10 @@
 use anyhow::Result;
-use bollard::Docker;
 use bollard::config::ContainerCreateBody;
 use bollard::models::{HostConfig, PortBinding};
 use bollard::query_parameters::{
     CreateContainerOptions, InspectContainerOptions, StartContainerOptions, StopContainerOptions,
 };
+use bollard::Docker;
 use std::collections::HashMap;
 use std::env;
 
@@ -38,6 +38,14 @@ impl DockerManager {
 
     pub async fn spawn_container(&self, id: String) -> Result<u16> {
         let valid_env = vec![
+            format!(
+                "WORLD_SIZE={}",
+                env::var("WORLD_SIZE").expect("Env WORLD_SIZE must be set")
+            ),
+            format!(
+                "QUADTREE_MAX_DEPTH={}",
+                env::var("QUADTREE_MAX_DEPTH").expect("Env QUADTREE_MAX_DEPTH must be set")
+            ),
             format!(
                 "HEARTBEAT_INTERVAL={}",
                 env::var("HEARTBEAT_INTERVAL").expect("Env HEARTBEAT_INTERVAL must be set")

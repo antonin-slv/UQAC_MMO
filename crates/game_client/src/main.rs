@@ -3,9 +3,10 @@ mod launcher;
 mod structs;
 
 use crate::launcher::LauncherPlugin;
-use crate::structs::{ClientState, LocalPlayer};
+use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::get_chunk;
 use game_message::msg_client_server::{PlayerInput, PlayerInputMsg};
 
 #[derive(Bundle)]
@@ -28,6 +29,7 @@ fn main() {
         .add_plugins(client_network::ClientNetworkPlugin)
         .add_plugins(LauncherPlugin)
         .insert_resource(Time::<Fixed>::from_seconds(1.0 / 60.0))
+        .insert_resource(Chunking { chunk_size: -0.0 })
         // Systèmes
         .add_systems(Startup, setup_graphics)
         .add_systems(
@@ -48,10 +50,16 @@ fn setup_graphics(mut commands: Commands) {
 fn capture_inputs(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     broker_client: ResMut<client_network::NetworkManager>,
-    local_player: Res<LocalPlayer>,
+    mut local_player: ResMut<LocalPlayer>,
+    chunking: Res<Chunking>,
+    local_entity_query: Query<&Transform, With<LocalControlledComponent>>,
 ) {
     // Si on n'est pas encore connecté, on ne fait rien
     if !broker_client.client.is_connected() {
+        return;
+    }
+
+    if local_player.entity_net_id.is_none() {
         return;
     }
 
@@ -71,15 +79,30 @@ fn capture_inputs(
     }
 
     let msg = PlayerInputMsg {
-        client_id: local_player.net_id,
+        entity_id: local_player.entity_net_id.unwrap(),
+        emitter_id: local_player.net_id,
         input_data: current_input,
     };
 
-    let input_topic = TopicBuilder::new(
-        SecurityDomain::PrivateReadPublicWrite,
-        Namespace::SpatialInput,
-    )
-    .append_chunk(&local_player.chunk)
-    .build();
-    broker_client.client.publish_unreliable(input_topic, &msg);
+    match local_entity_query.iter().next() {
+        Some(local_entity_transform) => {
+            let local_chunk = get_chunk(
+                local_entity_transform.translation.x,
+                local_entity_transform.translation.y,
+                chunking.chunk_size,
+            );
+            local_player.chunk = local_chunk;
+
+            let input_topic = TopicBuilder::new(
+                SecurityDomain::PrivateReadPublicWrite,
+                Namespace::SpatialInput,
+            )
+            .append_chunk(&local_player.chunk)
+            .build();
+            broker_client.client.publish_unreliable(input_topic, &msg);
+        }
+        None => {
+            println!("No local entity found");
+        }
+    };
 }

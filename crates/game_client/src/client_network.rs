@@ -1,5 +1,5 @@
-﻿use crate::PlayerBundle;
-use crate::structs::{ClientState, LocalPlayer};
+﻿use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
+use crate::PlayerBundle;
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;
@@ -7,12 +7,14 @@ use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::topics::{
-    AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION, SecurityDomain, TopicBuilder,
+    SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
 };
-use game_message::GameMessageHeaders;
 use game_message::msg_client_server::*;
+use game_message::msg_entities::NetworkEntityId;
+use game_message::GameMessageHeaders;
+
 #[derive(Component)]
-struct NetworkEntity(u32);
+struct NetIdComp(NetworkEntityId);
 
 #[derive(Message)]
 struct SnapshotMessage(PersonalSnapshot);
@@ -52,6 +54,7 @@ fn network_bridge_system(
     mut local_player: ResMut<LocalPlayer>,
     mut msg_snapshot: MessageWriter<SnapshotMessage>,
     mut next_state: ResMut<NextState<ClientState>>,
+    mut chunking: ResMut<Chunking>,
 ) {
     while let Some(event) = net.client.poll() {
         match event {
@@ -93,6 +96,7 @@ fn network_bridge_system(
                         Ok(msg) => {
                             local_player.chunk = msg.chunk;
                             local_player.net_id = msg.client_id;
+                            chunking.chunk_size = msg.chunk_size;
                             println!("[Client] Got welcome message (ID: {})", msg.client_id);
                             next_state.set(ClientState::InGame);
                         }
@@ -129,11 +133,13 @@ fn network_bridge_system(
 }
 
 fn process_snapshots(
+    broker: Res<NetworkManager>,
+    mut local_player: ResMut<LocalPlayer>,
     mut reader: MessageReader<SnapshotMessage>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut query_net_entities: Query<(Entity, &NetworkEntity, &mut Transform)>,
+    mut query_net_entities: Query<(Entity, &NetIdComp, &mut Transform)>,
 ) {
     let mut entity_to_spawn: Vec<EntitySnapshot> = Vec::new();
     // On récupère tout les snapshot reçu lors de cette frame
@@ -163,13 +169,31 @@ fn process_snapshots(
 
     for entity in entity_to_spawn {
         println!("Nouvelle entité réseau découverte : {}", entity.network_id);
-        commands.spawn((
+
+        let i_am_owner = entity.owner_id == broker.client.node_id.unwrap_or(0);
+
+        if i_am_owner {
+            local_player.entity_net_id = Some(entity.network_id);
+        }
+
+        let spawn_color = if i_am_owner {
+            Color::srgb(0.9, 0.2, 0.7)
+        } else {
+            Color::srgb(0.2, 0.7, 0.9)
+        };
+
+        let bundle_to_spawn = (
             PlayerBundle {
                 mesh: Mesh2d(meshes.add(Circle::new(10.0))),
-                material: MeshMaterial2d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+                material: MeshMaterial2d(materials.add(spawn_color)),
                 transform: Transform::from_xyz(entity.position[0], entity.position[1], 0.0),
             },
-            NetworkEntity(entity.network_id),
-        ));
+            NetIdComp(entity.network_id),
+        );
+
+        let mut entity_handle = commands.spawn(bundle_to_spawn);
+        if i_am_owner {
+            entity_handle.insert(LocalControlledComponent);
+        }
     }
 }
