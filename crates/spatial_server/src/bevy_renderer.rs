@@ -1,7 +1,7 @@
 #[cfg(feature = "debug_visual")]
 pub mod bevy_renderer {
     use crate::quadtree::QuadTree;
-    use crate::shard_manager::ShardManager;
+    use crate::shard_manager::{Shard, ShardManager};
     use bevy::DefaultPlugins;
     use bevy::app::{App, Startup, Update};
     use bevy::camera::Camera2d;
@@ -9,6 +9,7 @@ pub mod bevy_renderer {
     use bevy::math::{Isometry2d, Rot2, Vec2};
     use bevy::prelude::{Commands, Gizmos, Res, ResMut, Resource};
     use bevy_text_gizmos::TextGizmos;
+    use std::collections::HashSet;
     use std::sync::Mutex;
     use std::sync::mpsc::Receiver;
 
@@ -83,17 +84,26 @@ pub mod bevy_renderer {
                 Rot2::IDENTITY,
             );
             gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
-            if let Some(shard) = shard_manager.shards.get(&quad_tree.shard_id) {
-                if let Some(dgs) = shard.dgs {
-                    gizmos.text_2d(
-                        start,
-                        format!("{}", dgs).as_str(),
-                        16.0 - quad_tree.depth as f32,
-                        Vec2::ZERO,
-                        Color::WHITE,
-                    );
-                }
-            }
+            gizmos.text_2d(
+                start,
+                format!(
+                    "{}\n{}",
+                    quad_tree.shard_id,
+                    shard_manager
+                        .shards
+                        .get(&quad_tree.shard_id)
+                        .unwrap_or(&Shard {
+                            dgs: Some(0),
+                            entities: HashSet::new()
+                        })
+                        .dgs
+                        .unwrap_or(0)
+                )
+                .as_str(),
+                16.0 - quad_tree.depth as f32,
+                Vec2::ZERO,
+                Color::WHITE,
+            );
         }
     }
 }

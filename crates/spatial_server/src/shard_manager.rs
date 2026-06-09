@@ -2,7 +2,7 @@ use crate::broker_client::BrokerClient;
 use crate::quadtree::{Entity, ShardId};
 use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
 pub struct Shard {
@@ -14,9 +14,7 @@ pub struct Shard {
 pub struct ShardManager {
     pub entities: HashMap<NodeId, ShardId>,
     pub shards: HashMap<ShardId, Shard>,
-    pub active_dgs: HashMap<NodeId, ShardId>,
-    pub shard_without_dgs: VecDeque<ShardId>,
-    pub dgs_without_shards: VecDeque<NodeId>,
+    pub active_dgs: HashMap<NodeId, Option<ShardId>>,
 }
 
 impl ShardManager {
@@ -25,17 +23,13 @@ impl ShardManager {
             entities: HashMap::new(),
             shards: HashMap::new(),
             active_dgs: HashMap::new(),
-            shard_without_dgs: VecDeque::new(),
-            dgs_without_shards: VecDeque::new(),
         }
     }
 
     pub fn on_heartbeat_receive(&mut self, new_dgs_id: NodeId) {
-        if self.active_dgs.contains_key(&new_dgs_id) {
-            return;
-        }
-
-        if self.dgs_without_shards.contains(&new_dgs_id) {
+        if let Some(dgs) = self.active_dgs.get(&new_dgs_id)
+            && dgs.is_some()
+        {
             return;
         }
 
@@ -49,9 +43,9 @@ impl ShardManager {
         bounds: Rect,
         broker: &BrokerClient,
     ) {
-        broker.spawn_new_dgs(1);
+        //broker.spawn_new_dgs(1);
 
-        println!("On new shard !");
+        println!("On new shard ! : {:?}", shard_id);
 
         let mut old_dgs_id = Vec::new();
         if let Some(shard) = self.shards.get_mut(&parent) {
@@ -62,14 +56,18 @@ impl ShardManager {
 
         println!("Old DGS ID: {:?}", old_dgs_id);
 
-        if let Some(new_dgs) = self.dgs_without_shards.pop_front() {
-            broker.assign_shard_to_dgs(new_dgs, vec![bounds], old_dgs_id.clone());
+        if let Some((new_dgs, _)) = self
+            .active_dgs
+            .iter_mut()
+            .find(|(_, shard)| shard.is_none())
+        {
+            broker.assign_shard_to_dgs(new_dgs.clone(), vec![bounds], old_dgs_id.clone());
             if let Some(shard) = self.shards.get_mut(&shard_id) {
-                shard.dgs = Some(new_dgs);
+                shard.dgs = Some(new_dgs.clone());
             }
-        } else {
-            println!("Add shard on buffer");
-            self.shard_without_dgs.push_back(shard_id);
+        }
+
+        if let None = self.shards.get(&shard_id) {
             self.shards.insert(
                 shard_id,
                 Shard {
@@ -87,17 +85,7 @@ impl ShardManager {
         shards: Vec<ShardId>,
         broker: &BrokerClient,
     ) {
-        println!("Destroyed Shards : {:?}", shards);
         for shard_id in shards {
-            if let Some(pos) = self
-                .shard_without_dgs
-                .iter()
-                .position(|s_id| *s_id == shard_id)
-            {
-                self.shard_without_dgs.remove(pos);
-                continue;
-            }
-
             if let Some(shard) = self.shards.get(&shard_id)
                 && let Some(dgs) = shard.dgs
             {
@@ -114,31 +102,28 @@ impl ShardManager {
     }
 
     pub fn on_new_dgs(&mut self, dgs_id: NodeId) {
-        if let Some(shard_id) = self.shard_without_dgs.pop_front() {
-            self.active_dgs.insert(dgs_id, shard_id);
-            if let Some(shard) = self.shards.get_mut(&shard_id) {
-                shard.dgs = Some(dgs_id);
-            }
-        } else {
-            self.dgs_without_shards.push_back(dgs_id);
+        let mut shard_available = None;
+
+        if let Some((shard_id, shard)) = self
+            .shards
+            .iter_mut()
+            .find(|(_, shard)| shard.dgs.is_none())
+        {
+            shard_available = Some(shard_id.clone());
+            shard.dgs = Some(dgs_id);
+
+            println!("New DGS assigned: {:?}", shard.dgs);
         }
+
+        self.active_dgs.insert(dgs_id, shard_available);
     }
 
     pub fn on_dgs_stopped(&mut self, dgs_id: NodeId) {
         println!("DGS Stopped : {:?}", dgs_id);
-        if let Some(pos) = self
-            .dgs_without_shards
-            .iter()
-            .position(|dgs| dgs.clone() == dgs_id)
-        {
-            self.dgs_without_shards.remove(pos);
-            return;
-        }
 
-        if let Some(shard_id) = self.active_dgs.get_mut(&dgs_id) {
+        if let Some(Some(shard_id)) = self.active_dgs.get_mut(&dgs_id) {
             if let Some(shard) = self.shards.get_mut(shard_id) {
                 shard.dgs = None;
-                self.shard_without_dgs.push_back(*shard_id);
             }
         }
     }
@@ -151,7 +136,7 @@ impl ShardManager {
             self.remove_entity_from_shard(shard.clone(), client_id);
         } else {
             println!("No shard found for client : {}", client_id)
-        }   
+        }
     }
 
     pub fn set_entity_shard(&mut self, shard_id: ShardId, entity: Entity) {
