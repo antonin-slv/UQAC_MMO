@@ -7,7 +7,8 @@ services:
   game_server:
     build:
       context: .
-      dockerfile: crates/game_server/Dockerfile
+      dockerfile: Dockerfile
+      target: final_game_server
     image: game-server
     container_name: game_server_template
     command: [ "echo", "✅ Image game-server compilée et prête pour l'orchestrateur !" ]
@@ -42,14 +43,15 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: crates/orchestrator/Dockerfile
+      dockerfile: Dockerfile
+      target: final_orchestrator
     image: orchestrator
     env_file:
       - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - "3631:3631"
+    expose:
+      - "${ORCH_PORT}/udp"
     depends_on:
       redis:
         condition: service_started
@@ -65,12 +67,13 @@ services:
   gate_keeper:
     build:
       context: .
-      dockerfile: crates/gate_keeper/Dockerfile
+      dockerfile: Dockerfile
+      target: final_gate_keeper
     image: gate-keeper
     env_file:
       - .env
     ports:
-      - "3630:3630"
+      - "${GATEKEEPER_PORT}:${GATEKEEPER_PORT}"
     depends_on:
       - orchestrator
       - db
@@ -101,34 +104,39 @@ services:
   broker:
     build:
       context: .
-      dockerfile: crates/broker/Dockerfile
+      dockerfile: Dockerfile
+      target: final_broker
     image: broker
     env_file:
       - .env
     ports:
-      - "3632:3632/udp"
-      - "3633:3633/udp"
+      - "${BROKER_PRIVATE_PORT}:${BROKER_PRIVATE_PORT}/udp"
+      - "${BROKER_PUBLIC_PORT}:${BROKER_PUBLIC_PORT}/udp"
     restart: always
     container_name: broker
     networks:
       - mmo_network
-  #spatial_server:
+  spatial_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final_spatial_server
+    image: spatial-server
+    env_file:
+      - .env
+    expose:
+      - "${SPATIAL_PORT}/udp"
+    restart: always
+    depends_on:
+      broker:
+        condition: service_started
+    container_name: spatial_server
+    networks:
+      - mmo_network
+  #smock_spatial_auth_server:
   #  build:
   #    context: .
-  #    dockerfile: crates/spatial_server/Dockerfile
-  #  image: spatial-server
-  #  env_file:
-  #    - .env
-  #  ports:
-  #    - "3634:3634/udp"
-  #  restart: always
-  #  container_name: spatial_server
-  #  networks:
-  #    - mmo_network
-  #mock_spatial_auth_server:
-  #  build:
-  #    context: .
-  #    dockerfile: crates/mock_spatial_auth_server/Dockerfile
+  #    dockerfile: Dockerfile
   #  image: mock_spatial_auth_server
   #  env_file:
   #    - .env

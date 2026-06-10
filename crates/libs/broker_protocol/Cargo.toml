@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "broker_protocol"
 path = "src/lib.rs"
+
 [dependencies]
 bytes = { workspace = true }
 core_types = { workspace = true }

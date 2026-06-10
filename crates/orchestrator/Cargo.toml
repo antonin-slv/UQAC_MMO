@@ -12,8 +12,6 @@ dotenv = { workspace = true }
 
 # Spécifiques à l'Orchestrateur
 bollard = "0.21"
-futures-util = "0.3"
-winapi = { version = "0.3", features = ["winerror", "minwindef", "winbase"] }
 broker_client = { workspace = true }
 not_games = { workspace = true }
 game_message = { workspace = true }

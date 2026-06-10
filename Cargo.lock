@@ -5272,13 +5272,11 @@ dependencies = [
  "broker_client",
  "broker_protocol",
  "dotenv",
- "futures-util",
  "game_message",
  "not_games",
  "redis",
  "tokio",
  "uuid",
- "winapi",
 ]
 
 [[package]]
