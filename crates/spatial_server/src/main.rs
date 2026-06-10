@@ -1,5 +1,5 @@
 #[cfg(feature = "debug_visual")]
-use crate::bevy_renderer::start_renderer;
+use crate::bevy_renderer::bevy_renderer::start_renderer;
 use crate::broker_client::BrokerClient;
 use crate::quadtree::{Entity, QuadTree};
 use crate::shard_manager::ShardManager;
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     let quad_tree_handle = tokio::spawn(async move {
         let mut shard_manager = ShardManager::new();
         let mut broker_client = BrokerClient::new();
-        let mut quad_tree = QuadTree::new(&mut shard_manager, &broker_client);
+        let mut quad_tree: Option<QuadTree> = None;
 
         println!("[Acteur QuadTree] Initialisé et à l'écoute...");
 
@@ -41,23 +41,47 @@ async fn main() -> Result<()> {
             while let Ok(command) = quadtree_rx.try_recv() {
                 match command {
                     QuadTreeCommand::MoveEntity(entity) => {
-                        quad_tree.insert(entity, &mut shard_manager, &broker_client);
+                        if let Some(quad_tree) = &mut quad_tree {
+                            quad_tree.insert(entity, &mut shard_manager, &broker_client);
 
-                        #[cfg(feature = "debug_visual")]
-                        let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                            #[cfg(feature = "debug_visual")]
+                            let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                        }
                     }
                     QuadTreeCommand::TryMerge => {
-                        quad_tree.try_merge(&mut shard_manager, &broker_client);
+                        if let Some(quad_tree) = &mut quad_tree {
+                            let merged_shards = quad_tree.try_merge(&mut shard_manager);
+                            for (shard_id, merged_shards) in merged_shards {
+                                let bounds = quad_tree.get_shard_bounds(&shard_id);
+                                if let Some((bounds, _)) = bounds {
+                                    shard_manager.on_shard_destroyed(
+                                        shard_id,
+                                        bounds,
+                                        merged_shards,
+                                        &broker_client,
+                                    );
+                                    shard_manager.on_new_shard(
+                                        None,
+                                        shard_id,
+                                        bounds,
+                                        &broker_client,
+                                    );
+                                }
+                            }
 
-                        #[cfg(feature = "debug_visual")]
-                        let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                            #[cfg(feature = "debug_visual")]
+                            let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
+                        }
                     }
                 }
             }
 
-            broker_client
+            if broker_client
                 .poll_handle(&mut quad_tree, &mut shard_manager)
-                .await;
+                .await
+            {
+                quad_tree = Some(QuadTree::new(&mut shard_manager, &broker_client));
+            }
         }
     });
 
