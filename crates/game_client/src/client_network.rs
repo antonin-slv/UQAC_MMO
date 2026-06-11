@@ -98,6 +98,19 @@ fn network_bridge_system(
                             local_player.net_id = msg.client_id;
                             chunking.chunk_size = msg.chunk_size;
                             println!("[Client] Got welcome message (ID: {})", msg.client_id);
+
+                            let mut borders = GameChunkAera::from(msg.chunk).get_borders(1);
+                            borders.push(msg.chunk.clone());
+                            let topic_builder = TopicBuilder::new(
+                                SecurityDomain::PublicReadPrivateWrite,
+                                Namespace::Chunk,
+                            );
+
+                            for border_chunk in borders {
+                                let topic =
+                                    topic_builder.clone().append_chunk(&border_chunk).build();
+                                net.client.subscribe(topic, 0);
+                            }
                             next_state.set(ClientState::InGame);
                         }
                         Err(e) => {
@@ -152,7 +165,7 @@ fn process_snapshots(
 
             if let Some((_, _, mut transform)) = existing_entity {
                 transform.translation.x = net_entity.position[0];
-                transform.translation.z = net_entity.position[1];
+                transform.translation.y = net_entity.position[1];
                 continue;
             }
 
@@ -198,27 +211,35 @@ fn process_snapshots(
     }
 }
 
-
 fn what_is_my_chunks(
-    broker : Res<NetworkManager>,
-    my_entity : Query<&Transform, With<LocalControlledComponent>>,
-    chunking: Res<Chunking>
+    broker: Res<NetworkManager>,
+    my_entity: Query<&Transform, With<LocalControlledComponent>>,
+    chunking: Res<Chunking>,
+    mut local_player: ResMut<LocalPlayer>,
 ) {
-
     my_entity.iter().for_each(|transform| {
-        let c_chunk = get_chunk(transform.translation.x, transform.translation.y,  chunking.chunk_size);
+        let c_chunk = get_chunk(
+            transform.translation.x,
+            transform.translation.y,
+            chunking.chunk_size,
+        );
 
-        let borders = GameChunkAera::from(c_chunk).get_borders();
+        if c_chunk != local_player.chunk {
+            local_player.chunk = c_chunk;
+            let mut borders = GameChunkAera::from(c_chunk).get_borders(1);
+            borders.push(c_chunk.clone());
+            let topic_builder =
+                TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk);
 
-        let topic_builder = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite,Namespace::Chunk);
+            for border_chunk in borders {
+                let topic = topic_builder.clone().append_chunk(&border_chunk).build();
+                broker.client.subscribe(topic, 0);
+            }
 
-        for border_chunk in borders {
-
-            let topic = topic_builder.clone().append_chunk(&border_chunk).build();
-            broker.client.subscribe(topic, 0);
-
+            println!(
+                "Je suis maintenant dans le chunk ({}, {})",
+                c_chunk.x, c_chunk.y
+            );
         }
-
     })
-
 }

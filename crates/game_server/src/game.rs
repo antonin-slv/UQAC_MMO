@@ -99,9 +99,13 @@ fn handle_new_players(
             .push((player_entity, net_id));
 
         println!(
-            "[Logic] Player {} connected with net_id {} and spawned at chunk ({}, {})",
+            "[Logic] Player {} connected with entity {} and spawned at chunk ({}, {})",
             msg.msg.client_id, net_id, spawn_chunk.x, spawn_chunk.y
         );
+
+        if !chunk_manager.assigned_chunks.contains(&spawn_chunk) {
+            eprintln!("\t Warning : This isn't one of our chunks ! My chunks :");
+        }
     }
 }
 

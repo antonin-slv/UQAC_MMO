@@ -34,37 +34,8 @@ impl NetRead for GameChunk {
     }
 }
 
-#[derive(Debug, Decode, Encode, Clone, Copy)]
-pub struct SerializedGameChunkAera {
-    x_min: i16,
-    x_max: i16,
-    y_min: i16,
-    y_max: i16,
-}
-
-impl From<GameChunkAera> for SerializedGameChunkAera {
-    fn from(value: GameChunkAera) -> Self {
-        Self {
-            x_min: value.x_min,
-            x_max: value.x_max,
-            y_min: value.y_min,
-            y_max: value.y_max,
-        }
-    }
-}
-impl Into<GameChunkAera> for SerializedGameChunkAera {
-    fn into(self) -> GameChunkAera {
-        GameChunkAera {
-            x_min: self.x_min,
-            x_max: self.x_max,
-            y_min: self.y_min,
-            y_max: self.y_max,
-        }
-    }
-}
-
 impl_bitcode_net_message!(
-    SerializedGameChunkAera,
+    GameChunkAera,
     GameMessageHeaders::DiscardedMessageBecauseYouKnow
 );
 

@@ -1,7 +1,7 @@
 // server/src/network.rs
 
 use crate::events;
-use crate::events::{EntityStateTransferEvent, SnapshotReceived};
+use crate::events::{AssignedChunks, EntityStateTransferEvent, SnapshotReceived};
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
@@ -203,6 +203,7 @@ fn send_heartbeat_system(
     mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
+    managed_chunks: Res<AssignedChunks>,
 ) {
     timer.timer.tick(time.delta());
 
@@ -211,7 +212,8 @@ fn send_heartbeat_system(
             id: server_info.uuid.to_string(),
             node_id: broker.client.node_id.unwrap_or(0),
             zone: server_info.zone.clone(),
-            player_count: client_directory.sessions.len(),
+            player_count: client_directory.sessions.len()
+                + (managed_chunks.assigned_chunks.len() > 0) as usize,
             max_players: server_info.max_players,
         };
 

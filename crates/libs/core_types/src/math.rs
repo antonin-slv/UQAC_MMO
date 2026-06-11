@@ -2,6 +2,7 @@ use crate::chunks::{GameChunk, GameChunkAera};
 use bitcode::{Decode, Encode};
 
 pub mod chunks;
+pub mod helpers;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Vec2 {
@@ -74,17 +75,16 @@ impl Rect {
     }
 
     pub fn get_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
-        let start_x = (self.min_x / chunk_size).floor() as i16;
-        let end_x = (self.max_x / chunk_size).floor() as i16;
+        let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
+        let mut chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+        chunk_max.x -= 1;
+        chunk_max.y -= 1;
 
-        let start_y = (self.min_y / chunk_size).floor() as i16;
-        let end_y = (self.max_y / chunk_size).floor() as i16;
-
-        let total_chunks = ((end_x - start_x + 1) * (end_y - start_y + 1)) as usize;
+        let total_chunks = ((chunk_max.x - chunk_min.x + 1) * (chunk_max.y - chunk_min.y + 1)) as usize;
         let mut chunks = Vec::with_capacity(total_chunks);
 
-        for y in start_y..=end_y {
-            for x in start_x..=end_x {
+        for y in chunk_min.y..=chunk_max.y {
+            for x in chunk_min.x..=chunk_max.x {
                 chunks.push(GameChunk { x, y });
             }
         }

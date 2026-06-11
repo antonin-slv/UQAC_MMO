@@ -2357,6 +2357,7 @@ name = "core_types"
 version = "0.1.0"
 dependencies = [
  "bitcode",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -2442,6 +2443,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "crate_test"
+version = "0.1.0"
+dependencies = [
+ "core_types",
 ]
 
 [[package]]

@@ -13,7 +13,7 @@ members = [
     "crates/libs/not_games",
     "crates/libs/core_types",
     "crates/libs/broker_protocol",
-    "crates/libs/game_message"]
+    "crates/libs/game_message", "crates/libs/crate_test"]
 
 
 #common dependencies

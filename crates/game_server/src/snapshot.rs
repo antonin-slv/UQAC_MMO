@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::get_chunk;
-use game_message::core_types::SerializedGameChunkAera;
 use game_message::msg_client_server::*;
 use game_message::msg_dgs;
 
@@ -35,13 +34,18 @@ impl Plugin for SnapshotPlugin {
 fn update_and_send_autority_pre_snapshot(
     broker: Res<BrockerManager>,
     chunk_assigned: ResMut<AssignedChunks>,
-    mut query_entities: Query<(&Transform, &ControlledBy, &mut Authority)>,
+    mut query_entities: Query<(
+        &Transform,
+        &ControlledBy,
+        &NetworkIdComponent,
+        &mut Authority,
+    )>,
 ) {
     let chunk_size = chunk_assigned.chunk_size;
     let my_chunks = &chunk_assigned.assigned_chunks;
 
     let mut handoffmap = FastMap::default();
-    for (transform, owner, mut auth) in query_entities.iter_mut() {
+    for (transform, owner, ett_net_id, mut auth) in query_entities.iter_mut() {
         if *auth != Authority::Authoritative {
             continue;
         }
@@ -50,6 +54,8 @@ fn update_and_send_autority_pre_snapshot(
         let entity_chunk = get_chunk(translation[0], translation[1], chunk_size);
         if !my_chunks.contains(&entity_chunk) {
             *auth = Authority::LastAuthFrame;
+        } else {
+            continue;
         }
         let entity_meta_data = FullEntityMetaData {
             entity_type: 0,
@@ -58,12 +64,16 @@ fn update_and_send_autority_pre_snapshot(
         };
 
         let entity_data = FullEntityState {
-            network_entity_id: 0,
+            network_entity_id: ett_net_id.0,
             owner_node_id: owner.client_id,
             position: translation.to_array(),
             velocity: [0.0, 0.0],
             meta_data: entity_meta_data,
         };
+        println!(
+            "Relieving Author of Ett {} for {:?}",
+            entity_data.network_entity_id, entity_chunk
+        );
 
         handoffmap
             .entry(entity_chunk)
@@ -75,7 +85,7 @@ fn update_and_send_autority_pre_snapshot(
         let message = msg_dgs::EntityStateTransferHandoff {
             chunk_handoff: false,
             entity_handoff: true,
-            origin_aera: SerializedGameChunkAera::from(GameChunkAera::from(chunk)),
+            origin_aera: GameChunkAera::from(chunk),
             old_owner: broker.client.node_id,
             data: vec_of_serialized_entities,
         };
@@ -172,6 +182,7 @@ fn update_existence(
                     entities.retain(|&e| e.0 != entity);
                 });
             commands.entity(entity).despawn();
+            println!("Delete ref to entity {:?}", entity);
         }
     }
 }

@@ -1,11 +1,10 @@
-use crate::core_types::SerializedGameChunkAera;
 use crate::{
     impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo,
 };
 use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::chunks::GameChunk;
+use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::Rect;
 
 #[derive(Decode, Encode, Debug)]
@@ -111,7 +110,7 @@ impl NetRead for SpawnClientMsg {
 pub struct EntityStateTransferHandoff {
     pub entity_handoff : bool,
     pub chunk_handoff : bool,
-    pub origin_aera: SerializedGameChunkAera,
+    pub origin_aera: GameChunkAera,
     pub old_owner : Option<NodeId>,
     pub data: Vec<Vec<u8>>, //géré directement par les DGS
 }
