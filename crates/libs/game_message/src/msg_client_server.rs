@@ -55,6 +55,11 @@ impl InputBuffer {
         self.history.push_back((time, input));
     }
 
+    pub fn recv_other(&mut self, other_buffer : InputBuffer) {
+        self.max_size = other_buffer.max_size;
+        self.history = other_buffer.history;
+    }
+
     pub fn get_last_input(&self) -> Option<(Tick, PlayerInput)> {
         match self.history.iter().last() {
             Some(last_input) => Some(*last_input),

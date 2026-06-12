@@ -1,4 +1,5 @@
 // server/src/snapshot.rs
+use crate::dgs_entity_functions::{Authority, EntityTypeComponent, InputComponent};
 use crate::dgs_network::{BrockerManager, NetworkIdComponent, ServerStats};
 use crate::events::{AssignedChunks, FastMap};
 use crate::game::{ClientDirectory, ControlledBy, EntityDirectory};
@@ -9,7 +10,6 @@ use core_types::get_chunk;
 use game_message::msg_client_server::*;
 use game_message::msg_dgs;
 use game_message::msg_entities::{EntityData, NetComponent};
-use crate::dgs_entity_functions::Authority;
 
 pub struct SnapshotPlugin;
 
@@ -39,6 +39,8 @@ fn update_and_send_authority_pre_snapshot(
         &Transform,
         &ControlledBy,
         &NetworkIdComponent,
+        &EntityTypeComponent,
+        &InputComponent,
         &mut Authority,
     )>,
 ) {
@@ -46,7 +48,7 @@ fn update_and_send_authority_pre_snapshot(
     let my_chunks = &chunk_assigned.assigned_chunks;
 
     let mut handoffmap = FastMap::default();
-    for (transform, owner, ett_net_id, mut auth) in query_entities.iter_mut() {
+    for (transform, owner, ett_net_id, entity, inputs, mut auth) in query_entities.iter_mut() {
         if *auth != Authority::Authoritative {
             continue;
         }
@@ -66,6 +68,8 @@ fn update_and_send_authority_pre_snapshot(
             translation.x,
             translation.y,
         )));
+        updates.push(NetComponent::Type(entity.0));
+        updates.push(NetComponent::Inputs(inputs.input_buffer.clone()));
         updates.push(NetComponent::Velocity(core_types::Vec2::new(0.0, 0.0)));
 
         let entity_data = EntityData {
@@ -100,7 +104,13 @@ fn broadcast_snapshots(
     net: ResMut<BrockerManager>,
     _server_data: ResMut<ServerStats>,
     chunk_assigned: ResMut<AssignedChunks>,
-    query_all_entities: Query<(&NetworkIdComponent, &ControlledBy, &Transform, &Authority)>,
+    query_all_entities: Query<(
+        &NetworkIdComponent,
+        &ControlledBy,
+        &Transform,
+        &Authority,
+        &EntityTypeComponent,
+    )>,
 ) {
     if !net.client.is_connected() {
         return;
@@ -116,18 +126,20 @@ fn broadcast_snapshots(
     // Pré-calcul de l'état du monde ---
     let mut precomputed_targets: FastMap<GameChunk, PersonalSnapshot> = FastMap::default();
 
-    for (net_id, owner, transform, auth) in query_all_entities.iter() {
+    for (net_id, owner, transform, auth, entity_type) in query_all_entities.iter() {
         if *auth == Authority::Ghost {
             continue;
         }
 
         let trans = transform.translation.truncate().to_array();
-        let mut replicated_components = Vec::new();
-        replicated_components.push(NetComponent::Velocity(core_types::Vec2::new(0.0, 0.0)));
-        replicated_components.push(NetComponent::Position(core_types::Vec2::new(
-            transform.translation.x,
-            transform.translation.y,
-        )));
+        let replicated_components = vec![
+            NetComponent::Velocity(core_types::Vec2::new(0.0, 0.0)),
+            NetComponent::Position(core_types::Vec2::new(
+                transform.translation.x,
+                transform.translation.y,
+            )),
+            NetComponent::Type(entity_type.0),
+        ];
 
         let entity_snapshot = EntityData {
             net_id: net_id.0,

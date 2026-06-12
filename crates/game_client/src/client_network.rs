@@ -94,34 +94,30 @@ fn network_bridge_system(
                 stream: _,
                 mut payload,
             } => match payload.header {
-                GameMessageHeaders::ClientWelcome => {
-                    let msg = payload.extract::<ClientWelcomeMsg>();
-                    match msg {
-                        Ok(msg) => {
-                            local_player.chunk = msg.chunk;
-                            local_player.net_id = msg.client_id;
-                            chunking.chunk_size = msg.chunk_size;
-                            println!("[Client] Got welcome message (ID: {})", msg.client_id);
+                GameMessageHeaders::ClientWelcome => match payload.extract::<ClientWelcomeMsg>() {
+                    Ok(msg) => {
+                        local_player.chunk = msg.chunk;
+                        local_player.net_id = msg.client_id;
+                        chunking.chunk_size = msg.chunk_size;
+                        println!("[Client] Got welcome message (ID: {})", msg.client_id);
 
-                            let mut borders = GameChunkAera::from(msg.chunk).get_borders(1);
-                            borders.push(msg.chunk.clone());
-                            let topic_builder = TopicBuilder::new(
-                                SecurityDomain::PublicReadPrivateWrite,
-                                Namespace::Chunk,
-                            );
+                        let mut borders = GameChunkAera::from(msg.chunk).get_borders(1);
+                        borders.push(msg.chunk.clone());
+                        let topic_builder = TopicBuilder::new(
+                            SecurityDomain::PublicReadPrivateWrite,
+                            Namespace::Chunk,
+                        );
 
-                            for border_chunk in borders {
-                                let topic =
-                                    topic_builder.clone().append_chunk(&border_chunk).build();
-                                net.client.subscribe(topic, 0);
-                            }
-                            next_state.set(ClientState::InGame);
+                        for border_chunk in borders {
+                            let topic = topic_builder.clone().append_chunk(&border_chunk).build();
+                            net.client.subscribe(topic, 0);
                         }
-                        Err(e) => {
-                            println!("[Client] Got welcome error: {}", e);
-                        }
+                        next_state.set(ClientState::InGame);
                     }
-                }
+                    Err(e) => {
+                        println!("[Client] Got welcome error: {}", e);
+                    }
+                },
                 GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
                     Ok(snapshot) => {
                         msg_snapshot.write(SnapshotMessage(snapshot));
@@ -204,7 +200,10 @@ fn process_snapshots(
     }
 
     for entity in entity_to_spawn {
-        println!("Nouvelle entité réseau découverte : {} de {}", entity.net_id, entity.owner_id);
+        println!(
+            "Nouvelle entité réseau découverte : {} de {}",
+            entity.net_id, entity.owner_id
+        );
         println!("(je suis {})", broker.client.node_id.unwrap_or(0));
 
         let i_am_owner = entity.owner_id == broker.client.node_id.unwrap_or(0);

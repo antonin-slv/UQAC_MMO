@@ -1,24 +1,32 @@
 ﻿use bevy::prelude::{Commands, Component, Entity, EntityCommands, Transform};
+use game_message::msg_client_server::InputBuffer;
 use game_message::msg_entities::{EntityType, NetComponent};
 
 #[derive(Component)]
 pub struct EntityComponent(pub EntityType);
 
+#[derive(Component)]
+struct InputComponent {
+    input_buffer: InputBuffer
+}
+
 pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComponent) {
     match net_comp {
         NetComponent::Position(pos) => {
-            // On mappe les floats du réseau vers le Transform de Bevy
             entity_cmds.insert(Transform::from_xyz(pos.x, pos.y, 0.0));
         }
-        NetComponent::Velocity(_vel) => {
-            // Exemple : tu as un composant local Velocity
-            // entity_cmds.insert(LocalVelocity(Vec2::new(vel.x, vel.y)));
+        NetComponent::Type(entity_type) => {
+            entity_cmds.insert(EntityComponent(*entity_type));
         }
-        NetComponent::Health(_health) => {
-            // entity_cmds.insert(LocalHealth { current: health.value });
+        NetComponent::Inputs(buffers) => {
+            entity_cmds.insert(InputComponent {
+                input_buffer: buffers.clone(),
+            });
         }
+        NetComponent::Velocity(_vel) => {}
+        NetComponent::Health(_health) => {}
         NetComponent::ControlledBy(_controller_id) => {}
-        _ => {} // Gérer les autres cas ou les ignorer
+        _ => {}
     }
 }
 

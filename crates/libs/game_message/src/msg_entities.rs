@@ -3,6 +3,7 @@ use crate::msg_client_server::InputBuffer;
 use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use core_types::Vec2;
+use std::cmp::PartialEq;
 
 pub type NetworkEntityId = u64;
 
@@ -14,6 +15,17 @@ pub enum EntityType {
     Turret,
     Wall,
     Projectile,
+}
+
+impl PartialEq<EntityType> for &EntityType {
+    fn eq(&self, other: &EntityType) -> bool {
+        **self as u8 == *other as u8
+    }
+}
+impl EntityType {
+    pub fn is_static(&self) -> bool {
+        self == EntityType::Turret || self == EntityType::Wall
+    }
 }
 
 // 3. L'énumération des Composants
@@ -29,7 +41,7 @@ pub enum NetComponent {
     ControlledBy(NodeId),
     EntityId(NetworkEntityId),
     Type(EntityType),
-    Inputs(Vec<InputBuffer>),
+    Inputs(InputBuffer),
 }
 
 // 4. Les Messages Réseau globaux

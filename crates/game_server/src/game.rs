@@ -1,10 +1,11 @@
-use crate::dgs_entity_functions::{spawn_entity, Authority};
+use crate::dgs_entity_functions::{spawn_entity, Authority, EntityTypeComponent, InputComponent};
 use crate::dgs_network::BrockerManager;
 pub(crate) use crate::dgs_network::{ControlledBy, NetworkIdGenerator};
 use crate::events;
 use crate::events::AssignedChunks;
 use bevy::prelude::*;
 use broker_protocol::broker_message::NodeId;
+use game_message::msg_client_server::InputBuffer;
 use game_message::msg_entities::{EntityData, EntityType, NetComponent, NetworkEntityId};
 use std::collections::HashMap;
 
@@ -17,9 +18,6 @@ pub struct ClientDirectory {
 pub struct EntityDirectory {
     pub entities: HashMap<NetworkEntityId, Entity>,
 }
-
-#[derive(Component, Default)]
-pub struct Player {}
 
 pub struct GameLogicPlugin;
 
@@ -35,7 +33,11 @@ impl Plugin for GameLogicPlugin {
             .add_systems(
                 Update,
                 (
-                    (handle_new_players, handle_disconnected, apply_player_inputs),
+                    (
+                        handle_new_players,
+                        handle_disconnected,
+                        (update_inputs, apply_inputs).chain(),
+                    ),
                     simulate_game,
                 )
                     .chain()
@@ -64,11 +66,15 @@ fn handle_new_players(
         player_pos *= chunk_manager.chunk_size;
         let player_pos = NetComponent::Position(player_pos);
         let player_comp = NetComponent::Type(EntityType::Player);
+        let player_input = NetComponent::Inputs(InputBuffer {
+            history: Default::default(),
+            max_size: 0,
+        });
 
         let entity_data = EntityData {
             net_id,
             owner_id: msg.msg.client_id,
-            updates: vec![player_pos, player_comp],
+            updates: vec![player_pos, player_comp, player_input],
         };
         let _ = spawn_entity(
             &mut commands,
@@ -77,7 +83,6 @@ fn handle_new_players(
             &mut entity_directory,
             &entity_data,
         );
-
         println!(
             "[Logic] Player {} connected with entity {} and spawned at chunk ({}, {})",
             msg.msg.client_id, net_id, msg.msg.chunk.x, msg.msg.chunk.y
@@ -109,13 +114,12 @@ fn handle_disconnected(
     }
 }
 
-fn apply_player_inputs(
+fn update_inputs(
     mut ev_input: MessageReader<events::PlayerInputEvent>,
-    mut query: Query<(&mut Transform, &mut Authority), With<Player>>,
+    mut query: Query<&mut InputComponent>,
     client_directory: ResMut<ClientDirectory>,
     entity_directory: ResMut<EntityDirectory>,
 ) {
-    //todo : passer par les buffers
     for ev in ev_input.read() {
         if let Some(possible_player_entities) = client_directory.sessions.get(&ev.client_id) {
             if let Some(_) = possible_player_entities
@@ -123,30 +127,49 @@ fn apply_player_inputs(
                 .find(|net_id| *net_id == &ev.entity_id)
             {
                 if let Some(entity) = entity_directory.entities.get(&ev.entity_id) {
-                    if let Ok((mut transform, autority)) = query.get_mut(*entity) {
-                        if *autority == Authority::Ghost {
-                            continue; // On n'applique les inputs que si le serveur a l'autorité
-                        }
-                        let last_input = ev.input_data.get_last_input();
-                        if let Some(last_input) = last_input {
-                            let xdiff =
-                                f32::from(last_input.1.right) - f32::from(last_input.1.left);
-                            let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
-                            transform.translation.x += xdiff * 5.0;
-                            transform.translation.y -= ydiff * 5.0;
-                        }
+                    if let Ok(mut inputs) = query.get_mut(*entity) {
+                        let mutable_inputs = inputs.as_mut();
+                        mutable_inputs
+                            .input_buffer
+                            .recv_other(ev.input_data.clone());
+                        continue;
+                    } else {
+                        println!("\t\tnot found in ecs");
                     }
+                } else {
+                    println!("\t\tnot found netID->Entity map");
                 }
+            } else {
+                println!("\t\t not found in player's entities");
             }
+        } else {
+            println!("\t\tThis player has no entity.");
         }
     }
 }
 
-fn simulate_game(mut query: Query<(&mut Transform, &mut Authority), With<Player>>) {
-    for (mut transform, autority) in query.iter_mut() {
+fn apply_inputs(mut query: Query<(&mut Transform, &Authority, &InputComponent)>) {
+    for (mut pos, auth, inputs) in query.iter_mut() {
+        if *auth == Authority::Ghost {
+            continue; // On n'applique les inputs que si le serveur a l'autorité
+        }
+        let last_input = inputs.input_buffer.get_last_input();
+        if let Some(last_input) = last_input {
+            let xdiff = f32::from(last_input.1.right) - f32::from(last_input.1.left);
+            let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
+            pos.translation.x += xdiff * 5.0;
+            pos.translation.y += ydiff * 5.0;
+        }
+    }
+}
+
+fn simulate_game(mut query: Query<(&mut Transform, &Authority, &EntityTypeComponent)>) {
+    for (mut transform, autority, entity_type) in query.iter_mut() {
         //todo : faire le jeu
-        if *autority == Authority::Authoritative {
-            transform.translation += Vec3::new(0.0, 0.5, 0.0);
+        if !entity_type.0.is_static() {
+            if *autority == Authority::Authoritative {
+                transform.translation += Vec3::new(0.0, 0.5, 0.0);
+            }
         }
     }
 }

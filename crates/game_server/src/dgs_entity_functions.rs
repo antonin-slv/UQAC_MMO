@@ -4,17 +4,75 @@ use bevy::prelude::{
     Bundle, Commands, Component, Entity, EntityCommands, GlobalTransform, Query, Transform, With,
 };
 use broker_protocol::broker_message::NodeId;
+use game_message::msg_client_server::InputBuffer;
 use game_message::msg_entities::{EntityData, EntityType, NetComponent, NetworkEntityId};
 
+#[derive(Component)]
+pub struct EntityTypeComponent(pub EntityType);
+
+impl Into<NetComponent> for EntityTypeComponent {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(self.0)
+    }
+}
 
 #[derive(Component)]
-pub struct EntityComponent(pub EntityType);
+pub struct Player;
+impl Into<NetComponent> for Player {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(EntityType::Player)
+    }
+}
+#[derive(Component)]
+pub struct Wall;
 
+impl Into<NetComponent> for Wall {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(EntityType::Wall)
+    }
+}
+
+#[derive(Component)]
+pub struct Projectile;
+
+impl Into<NetComponent> for Projectile {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(EntityType::Projectile)
+    }
+}
+
+#[derive(Component)]
+pub struct Zombie;
+impl Into<NetComponent> for Zombie {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(EntityType::Zombie)
+    }
+}
+
+#[derive(Component)]
+pub struct Turret;
+
+impl Into<NetComponent> for Turret {
+    fn into(self) -> NetComponent {
+        NetComponent::Type(EntityType::Turret)
+    }
+}
 #[derive(Component, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Authority {
     Authoritative,
     LastAuthFrame,
     Ghost,
+}
+
+#[derive(Component, PartialEq, Clone, Debug)]
+pub struct InputComponent {
+    pub input_buffer: InputBuffer,
+}
+
+impl Into<NetComponent> for InputComponent {
+    fn into(self) -> NetComponent {
+        NetComponent::Inputs(self.input_buffer.clone())
+    }
 }
 
 #[derive(Bundle)]
@@ -94,9 +152,9 @@ pub fn spawn_entity(
     entity_directory: &mut EntityDirectory,
     recv_entity: &EntityData,
 ) -> Entity {
-    let player_bundle = EntityBundlebase::new(recv_entity.net_id, recv_entity.owner_id, authority);
+    let entity_bundle = EntityBundlebase::new(recv_entity.net_id, recv_entity.owner_id, authority);
 
-    let mut spawned_id = commands.spawn(player_bundle);
+    let mut spawned_id = commands.spawn(entity_bundle);
 
     for component in &recv_entity.updates {
         insert_net_component(&mut spawned_id, component);
@@ -131,6 +189,22 @@ pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComp
                 client_id: *controller_id,
             });
         }
+        NetComponent::Type(entity) => {
+            entity_cmds.insert(EntityTypeComponent(*entity));
+            match entity {
+                EntityType::Player => entity_cmds.insert(Player),
+                EntityType::Projectile => entity_cmds.insert(Projectile),
+                EntityType::Wall => entity_cmds.insert(Wall),
+                EntityType::Turret => entity_cmds.insert(Turret),
+                EntityType::Zombie => entity_cmds.insert(Zombie),
+            };
+        }
+        NetComponent::Inputs(buffers) => {
+            entity_cmds.insert(InputComponent {
+                input_buffer: buffers.clone(),
+            });
+        }
+
         _ => {} // Gérer les autres cas ou les ignorer
     }
 }
@@ -145,7 +219,12 @@ pub fn update_net_component(entity: Entity, net_comp: &NetComponent, commands: &
         NetComponent::Type(entity_type) => {
             commands
                 .entity(entity)
-                .insert(EntityComponent(*entity_type));
+                .insert(EntityTypeComponent(*entity_type));
+        }
+        NetComponent::Inputs(input_buffer) => {
+            commands.entity(entity).insert(InputComponent {
+                input_buffer: input_buffer.clone(),
+            });
         }
         // La position est gérée directement dans le système pour éviter 1 frame de lag
         _ => {}

@@ -59,6 +59,7 @@ fn capture_inputs(
     }
 
     if local_player.entity_net_id.is_none() {
+        println!("No local entity");
         return;
     }
 
