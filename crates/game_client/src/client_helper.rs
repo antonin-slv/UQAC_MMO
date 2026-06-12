@@ -3,7 +3,7 @@ use game_message::msg_client_server::InputBuffer;
 use game_message::msg_entities::{EntityType, NetComponent};
 
 #[derive(Component)]
-pub struct EntityComponent(pub EntityType);
+pub struct EntityTypeComponent(pub EntityType);
 
 #[derive(Component)]
 struct InputComponent {
@@ -16,7 +16,7 @@ pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComp
             entity_cmds.insert(Transform::from_xyz(pos.x, pos.y, 0.0));
         }
         NetComponent::Type(entity_type) => {
-            entity_cmds.insert(EntityComponent(*entity_type));
+            entity_cmds.insert(EntityTypeComponent(*entity_type));
         }
         NetComponent::Inputs(buffers) => {
             entity_cmds.insert(InputComponent {
@@ -40,7 +40,7 @@ pub fn update_net_component(entity: Entity, net_comp: &NetComponent, commands: &
         NetComponent::Type(entity_type) => {
             commands
                 .entity(entity)
-                .insert(EntityComponent(*entity_type));
+                .insert(EntityTypeComponent(*entity_type));
         }
         // La position est gérée directement dans le système pour éviter 1 frame de lag
         _ => {}

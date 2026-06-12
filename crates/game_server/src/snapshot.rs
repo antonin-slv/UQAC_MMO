@@ -1,8 +1,10 @@
 // server/src/snapshot.rs
-use crate::dgs_entity_functions::{Authority, EntityTypeComponent, InputComponent};
-use crate::dgs_network::{BrockerManager, NetworkIdComponent, ServerStats};
+use crate::dgs_entity_functions::{
+    Authority, ControlledBy, EntityTypeComponent, InputComponent, NetworkIdComponent,
+};
+use crate::dgs_network::{BrockerManager, ServerStats};
 use crate::events::{AssignedChunks, FastMap};
-use crate::game::{ClientDirectory, ControlledBy, EntityDirectory};
+use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::GameChunk;
@@ -164,7 +166,7 @@ fn broadcast_snapshots(
     }
 }
 
-// 3 cas possibles :
+// 3 cas possibles : (en fait on recevra pas les infos je crois)
 //      -- dans mes chunks : authoritative
 //      -- dans mes ghost chunks : ghost
 //      -- ailleurs : despawn

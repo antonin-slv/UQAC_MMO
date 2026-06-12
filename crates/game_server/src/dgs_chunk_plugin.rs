@@ -1,10 +1,12 @@
-﻿use crate::dgs_entity_functions::{spawn_or_update_entity, Authority};
-use crate::dgs_network::{BrockerManager, NetworkIdComponent};
+﻿use crate::dgs_entity_functions::{
+    spawn_or_update_entity, Authority, ControlledBy, NetworkIdComponent,
+};
+use crate::dgs_network::BrockerManager;
 use crate::events;
 use crate::events::{
     AssignedChunks, ChunkTransferEvent, EntityTransferEvent, FastSet, PendingChunkTransfersForOther,
 };
-use crate::game::{ClientDirectory, ControlledBy, EntityDirectory};
+use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::app::Plugin;
 use bevy::ecs::relationship::RelationshipSourceCollection;
 use bevy::prelude::*;
@@ -44,7 +46,7 @@ impl Plugin for ChunkPlugin {
         .add_message::<events::ChunkHandOffMessage>()
         .add_message::<ChunkTransferEvent>()
         .add_systems(
-            Update,
+            PreUpdate,
             (
                 handle_snapshot_received,
                 handle_chunks_handoff_message,
@@ -141,10 +143,8 @@ fn handle_chunks_handoff_message(
                 println!("Received TakeArea Message");
                 for (aera, old_owner) in ev.message.areas.iter() {
                     println!("\t take {:?} from {:?}", aera, old_owner);
-                    
-                    let mut taken_chunk_aera = aera.bounding_chunk_aera(chunk_directory.chunk_size);
-                    taken_chunk_aera.x_max -= 1;
-                    taken_chunk_aera.y_max -= 1;
+
+                    let taken_chunk_aera = aera.bounding_chunk_aera(chunk_directory.chunk_size);
 
                     // 1. SÉPARATION STRICTE : CŒUR vs FRONTIÈRES
                     let mut new_border_chunks: Vec<GameChunk> = Vec::new();
@@ -255,8 +255,6 @@ fn handle_chunks_handoff_message(
                 for (aera, dgs) in ev.message.areas.iter() {
                     println!("\t give  {:?} to {:?}", aera, dgs);
                     let mut aera_as_chunk = aera.bounding_chunk_aera(chunk_directory.chunk_size);
-                    aera_as_chunk.x_max -= 1;
-                    aera_as_chunk.y_max -= 1;
                     println!("\n={:?}", aera_as_chunk);
                     pending_transfers.aeras.push((aera_as_chunk, *dgs));
                 }
@@ -415,10 +413,10 @@ fn execute_outgoing_chunk_handoff_transfers(
             "Executing handoff transfer for area {:?} to DGS {:?}",
             chunk_aera, target_dgs
         );
-        if target_dgs.is_none() {
+
+        let Some(target_dgs) = target_dgs else {
             continue;
-        }
-        let target_dgs = target_dgs.unwrap();
+        };
 
         for border_chunk in chunk_aera.get_borders(1).iter() {
             killed_ghost_chunks.insert(*border_chunk);
@@ -507,7 +505,7 @@ fn execute_outgoing_chunk_handoff_transfers(
     let roots_for_ghost = vec![input_base_topic, chunk_state_base_topic];
 
     for chunk_batch in vec_of_killed_ghost_chunks.chunks(200) {
-        //on le fait 200 par 200 pour éviter de dépasser les 1400 octets max de l'UDP... Ce serait surement mieux de le cacher dans la fonction du client.
+        //on le fait 200 par 200 pour éviter de dépasser les 1400 octets max de l'ethernet... Ce serait surement mieux de le cacher dans la fonction du client.
         let chunk_topic_pattern = TopicPattern::new()
             .with_list(roots_for_ghost.clone())
             .with_single_layer(chunk_batch.to_vec());
@@ -515,6 +513,7 @@ fn execute_outgoing_chunk_handoff_transfers(
         broker.client.batch_unsubscribe(chunk_topic_pattern, 0);
     }
 
+    //on se désincrit 
     let root_for_regular = vec![input_base_topic];
     for safe_regular_unsubscribe in lost_aeras_inner.iter() {
         let chunk_topic_pattern = TopicPattern::new()

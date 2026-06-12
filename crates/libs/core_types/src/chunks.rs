@@ -1,6 +1,6 @@
 ﻿use crate::Rect;
-use std::vec;
 use bitcode::{Decode, Encode};
+use std::vec;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Hash, Copy)]
 pub struct GameChunk {
@@ -37,7 +37,7 @@ impl GameChunk {
 
         bounding_aera
     }
-    
+
     pub fn get_borders_of(chunks: &[GameChunk], margin: u8) -> Vec<GameChunk> {
         if chunks.is_empty() || margin == 0 {
             return Vec::new();
@@ -150,16 +150,14 @@ impl GameChunkAera {
     pub fn to_core_rect(&self, size: f32) -> Rect {
         Rect {
             min_x: self.x_min as f32 * size,
-            max_x: self.x_max as f32 * size + size,
+            max_x: self.x_max as f32 * size + size - f32::MIN_POSITIVE,
             min_y: self.y_min as f32 * size,
-            max_y: self.y_max as f32 * size + size,
+            max_y: self.y_max as f32 * size + size - f32::MIN_POSITIVE,
         }
     }
 
-
     // donne les chunks de la bordure (1 == les chunks voisins pas dedans, 0 == les chunks les plus sur le bord, -1 == ???)
-    pub fn get_borders_as_aera(&self, margin : i8) -> Vec<GameChunkAera> {
-
+    pub fn get_borders_as_aera(&self, margin: i8) -> Vec<GameChunkAera> {
         let margin = margin as i16;
         let mut aeras = Vec::with_capacity(4);
 
@@ -193,7 +191,7 @@ impl GameChunkAera {
         aeras
     }
     // donne les chunks de la bordure (1 == les chunks voisins pas dedans, 0 == les chunks les plus sur le bord, -1 == ???)
-    pub fn get_borders(&self, margin : i8) -> Vec<GameChunk> {
+    pub fn get_borders(&self, margin: i8) -> Vec<GameChunk> {
         let mut chunks = Vec::with_capacity(
             ((self.x_max - self.x_min) * 2 + (self.y_max - self.y_min) * 2 + 8) as usize,
         );

@@ -1,11 +1,30 @@
-﻿use crate::dgs_network::{ControlledBy, NetworkIdComponent};
-use crate::game::{ClientDirectory, EntityDirectory};
+﻿use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::prelude::{
     Bundle, Commands, Component, Entity, EntityCommands, GlobalTransform, Query, Transform, With,
 };
 use broker_protocol::broker_message::NodeId;
 use game_message::msg_client_server::InputBuffer;
 use game_message::msg_entities::{EntityData, EntityType, NetComponent, NetworkEntityId};
+
+#[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NetworkIdComponent(pub NetworkEntityId);
+
+impl Into<NetComponent> for NetworkIdComponent {
+    fn into(self) -> NetComponent {
+        NetComponent::EntityId(self.0)
+    }
+}
+#[derive(Component, Copy, Clone)]
+pub struct ControlledBy {
+    pub client_id: NodeId,
+}
+
+impl Into<NetComponent> for ControlledBy {
+    fn into(self) -> NetComponent {
+        NetComponent::ControlledBy(self.client_id)
+    }
+}
+
 
 #[derive(Component)]
 pub struct EntityTypeComponent(pub EntityType);

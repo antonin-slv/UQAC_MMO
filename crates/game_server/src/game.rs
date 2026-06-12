@@ -1,6 +1,6 @@
 use crate::dgs_entity_functions::{spawn_entity, Authority, EntityTypeComponent, InputComponent};
 use crate::dgs_network::BrockerManager;
-pub(crate) use crate::dgs_network::{ControlledBy, NetworkIdGenerator};
+use crate::dgs_network::{NetworkIdGenerator};
 use crate::events;
 use crate::events::AssignedChunks;
 use bevy::prelude::*;
@@ -157,8 +157,8 @@ fn apply_inputs(mut query: Query<(&mut Transform, &Authority, &InputComponent)>)
         if let Some(last_input) = last_input {
             let xdiff = f32::from(last_input.1.right) - f32::from(last_input.1.left);
             let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
-            pos.translation.x += xdiff * 5.0;
-            pos.translation.y += ydiff * 5.0;
+            pos.translation.x += xdiff * 1.0;
+            pos.translation.y += ydiff * 1.0;
         }
     }
 }

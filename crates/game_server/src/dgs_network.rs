@@ -12,7 +12,7 @@ use game_message::msg_client_server::*;
 use game_message::msg_dgs::{
     ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
 };
-use game_message::msg_entities::{NetComponent, NetworkEntityId};
+use game_message::msg_entities::{NetworkEntityId};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -23,25 +23,6 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
 const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
-
-#[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NetworkIdComponent(pub NetworkEntityId);
-
-impl Into<NetComponent> for NetworkIdComponent {
-    fn into(self) -> NetComponent {
-        NetComponent::EntityId(self.0)
-    }
-}
-#[derive(Component, Copy, Clone)]
-pub struct ControlledBy {
-    pub client_id: NodeId,
-}
-
-impl Into<NetComponent> for ControlledBy {
-    fn into(self) -> NetComponent {
-        NetComponent::ControlledBy(self.client_id)
-    }
-}
 
 #[derive(Resource)]
 pub struct NetworkIdGenerator {
