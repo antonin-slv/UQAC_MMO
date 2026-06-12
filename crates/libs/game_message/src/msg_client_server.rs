@@ -1,88 +1,65 @@
 ﻿// -- les différents streams de données
 
-use crate::msg_entities::NetworkEntityId;
-use crate::{
-    impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo,
-};
+use crate::msg_entities::{EntityData, NetworkEntityId};
+use crate::{impl_bitcode_encode_decode, impl_game_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::GameChunk;
+use core_types::helpers::Tick;
+use std::collections::VecDeque;
 
 //
 // CLIENT SERVER COMMUNICATION
 //
-pub type Input = [u8; 16];
-
-#[derive(Encode, Decode, Copy, Clone, Debug)]
-pub struct EntitySnapshot {
-    pub network_id: NetworkEntityId,
-    pub owner_id: NodeId,
-    pub position: [f32; 2],
-}
-
 #[derive(Encode, Decode, Clone, Debug)]
 pub struct PersonalSnapshot {
-    pub entities: Vec<EntitySnapshot>,
+    pub entities: Vec<EntityData>,
+}
+impl_bitcode_encode_decode!(PersonalSnapshot);
+impl_game_message!(PersonalSnapshot, GameMessageHeaders::Snapshot);
+
+#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct PlayerInput {
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+    pub attack: bool,
+    pub shoot: bool,
+    pub build: bool,
 }
 
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct SnapshotMsg {
-    pub snapshot: PersonalSnapshot,
+/// Le Component Bevy attaché au Joueur (Local) ou à sa représentation serveur.
+#[derive(Clone, Encode, Decode, Debug, Default, PartialEq)]
+pub struct InputBuffer {
+    /// L'historique récent des inputs (ex: les 60 dernières frames)
+    pub history: VecDeque<(Tick, PlayerInput)>,
+    /// La taille maximale du buffer pour éviter les fuites de mémoire
+    pub max_size: u8,
 }
 
-impl_bitcode_net_message!(SnapshotMsg, GameMessageHeaders::Snapshot);
-
-#[derive(Encode, Decode, Clone, Debug, Default, PartialEq)]
-pub struct PlayerInput(pub u16);
-
-impl PlayerInput {
-    pub fn make_from_u8_slice(slice: &[u8]) -> Option<Self> {
-        if slice.len() != 2 {
-            return None;
+impl InputBuffer {
+    pub fn new(max_size: u8) -> Self {
+        Self {
+            history: VecDeque::with_capacity(max_size as usize),
+            max_size,
         }
-        let bytes: [u8; 2] = slice.try_into().ok()?;
-        Some(PlayerInput(u16::from_le_bytes(bytes)))
     }
 
-    pub fn to_u8_slice(&self) -> [u8; 2] {
-        self.0.to_le_bytes()
-    }
-    pub fn get_bit(&self, pos: u8) -> bool {
-        (self.0 >> pos) & 1 == 1
-    }
-    pub fn is_up(&self) -> bool {
-        self.get_bit(0)
-    }
-    pub fn is_down(&self) -> bool {
-        self.get_bit(1)
-    }
-    pub fn is_left(&self) -> bool {
-        self.get_bit(2)
+    /// Ajoute un nouvel input et vire les plus anciens si on dépasse max_size
+    pub fn push(&mut self, input: PlayerInput, time: Tick) {
+        if self.history.len() >= self.max_size as usize {
+            self.history.pop_front();
+        }
+        self.history.push_back((time, input));
     }
 
-    pub fn is_right(&self) -> bool {
-        self.get_bit(3)
-    }
-
-    //set pos-th bit to bit value. (0 being right)
-    pub fn set_bit(&mut self, bit: bool, pos: u8) {
-        self.0 = (self.0 & !(1u16 << pos)) | ((bit as u16) << pos);
-    }
-
-    pub fn set_up(&mut self, up: bool) {
-        self.set_bit(up, 0);
-    }
-
-    pub fn set_down(&mut self, down: bool) {
-        self.set_bit(down, 1);
-    }
-    pub fn set_left(&mut self, left: bool) {
-        self.set_bit(left, 2);
-    }
-
-    pub fn set_right(&mut self, right: bool) {
-        self.set_bit(right, 3);
+    pub fn get_last_input(&self) -> Option<(Tick, PlayerInput)> {
+        match self.history.iter().last() {
+            Some(last_input) => Some(*last_input),
+            None => None,
+        }
     }
 }
 
@@ -90,10 +67,10 @@ impl PlayerInput {
 pub struct PlayerInputMsg {
     pub emitter_id: NodeId,
     pub entity_id: NetworkEntityId,
-    pub input_data: PlayerInput,
+    pub input_data: InputBuffer,
 }
-
-impl_bitcode_net_message!(PlayerInputMsg, GameMessageHeaders::ClientInput);
+impl_bitcode_encode_decode!(PlayerInputMsg);
+impl_game_message!(PlayerInputMsg, GameMessageHeaders::ClientInput);
 
 pub struct ClientWelcomeMsg {
     pub client_id: NodeId,

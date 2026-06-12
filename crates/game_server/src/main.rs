@@ -3,7 +3,7 @@ mod dgs_network;
 mod events;
 mod game;
 mod snapshot;
-pub mod dgs_to_dgs_message;
+pub mod dgs_entity_functions;
 
 use crate::dgs_chunk_plugin::ChunksAuthorityLogicSet;
 use crate::dgs_network::{NetworkPlugin, NetworkSet};

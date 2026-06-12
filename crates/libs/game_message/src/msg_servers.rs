@@ -1,4 +1,4 @@
-﻿use crate::{impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+﻿use crate::{impl_bitcode_encode_decode, impl_game_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::PartialEq;
@@ -34,8 +34,8 @@ pub struct ServerHelloMSG {
     pub id: NodeId,
 }
 
-
-impl_bitcode_net_message!(ServerHelloMSG, GameMessageHeaders::FriendHello);
+impl_bitcode_encode_decode!(ServerHelloMSG);
+impl_game_message!(ServerHelloMSG, GameMessageHeaders::FriendHello);
 
 pub struct SpawnServerMSG {
     pub server_count: u8,

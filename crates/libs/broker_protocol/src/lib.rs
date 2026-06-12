@@ -20,7 +20,7 @@ mod tests {
         let pattern_area = TopicPattern::new()
             .with_fixed(vec![first_layer])
             .with_layers(area)
-            .with_range(0u8..=2u8)
+            .with_single_layer(0u8..=2u8)
             .with_fixed(vec![1, 2, 3, 4, 5, 6, 7, 8, 9]); // Liste d'octets à la fin
 
         pattern_area.unpack_into(|topic| {

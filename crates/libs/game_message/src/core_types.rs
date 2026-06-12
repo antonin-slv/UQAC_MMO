@@ -1,11 +1,13 @@
-use crate::{impl_bitcode_net_message, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::{
+    impl_bitcode_encode_decode, NetRead, NetWrite, NetWriteTo
+    ,
+};
 use bitcode::{Decode, Encode};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::{Rect, Vec2};
 
-
-impl_bitcode_net_message!(Rect, GameMessageHeaders::DiscardedMessageBecauseYouKnow);
+impl_bitcode_encode_decode!(Rect);
 
 impl NetWrite for GameChunk {
     fn serialize(&self) -> Bytes {
@@ -34,10 +36,7 @@ impl NetRead for GameChunk {
     }
 }
 
-impl_bitcode_net_message!(
-    GameChunkAera,
-    GameMessageHeaders::DiscardedMessageBecauseYouKnow
-);
+impl_bitcode_encode_decode!(GameChunkAera);
 
 #[derive(Debug, Decode, Encode, Clone)]
 pub struct SerializedVec2 {

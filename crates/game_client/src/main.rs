@@ -1,12 +1,14 @@
 mod client_network;
 mod launcher;
 mod structs;
+pub mod client_helper;
 
 use crate::launcher::LauncherPlugin;
 use crate::structs::{Chunking, ClientState, LocalPlayer};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
-use game_message::msg_client_server::{PlayerInput, PlayerInputMsg};
+use game_message::msg_client_server::{InputBuffer, PlayerInputMsg, PlayerInput};
+use std::collections::VecDeque;
 
 #[derive(Bundle)]
 pub struct CameraBundle {
@@ -15,10 +17,9 @@ pub struct CameraBundle {
 }
 
 #[derive(Bundle)]
-pub struct PlayerBundle {
+pub struct RootBundle {
     pub mesh: Mesh2d,
     pub material: MeshMaterial2d<ColorMaterial>,
-    pub transform: Transform,
 }
 
 fn main() {
@@ -64,22 +65,28 @@ fn capture_inputs(
     let mut current_input = PlayerInput::default();
 
     if keyboard_input.pressed(KeyCode::KeyW) || keyboard_input.pressed(KeyCode::KeyZ) {
-        current_input.set_up(true);
+        current_input.up = true;
     }
     if keyboard_input.pressed(KeyCode::KeyS) {
-        current_input.set_down(true);
+        current_input.down = true;
     }
     if keyboard_input.pressed(KeyCode::KeyA) || keyboard_input.pressed(KeyCode::KeyQ) {
-        current_input.set_left(true);
+        current_input.left = true;
     }
     if keyboard_input.pressed(KeyCode::KeyD) {
-        current_input.set_right(true);
+        current_input.right = true;
     }
+
+    let mut input_buffer = InputBuffer {
+        history: VecDeque::new(),
+        max_size: 1,
+    };
+    input_buffer.push(current_input, 0);
 
     let msg = PlayerInputMsg {
         entity_id: local_player.entity_net_id.unwrap(),
         emitter_id: local_player.net_id,
-        input_data: current_input,
+        input_data: input_buffer,
     };
 
     let input_topic = TopicBuilder::new(

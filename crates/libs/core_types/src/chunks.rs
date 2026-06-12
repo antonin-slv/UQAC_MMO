@@ -37,7 +37,7 @@ impl GameChunk {
 
         bounding_aera
     }
-
+    
     pub fn get_borders_of(chunks: &[GameChunk], margin: u8) -> Vec<GameChunk> {
         if chunks.is_empty() || margin == 0 {
             return Vec::new();
