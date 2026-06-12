@@ -1,15 +1,17 @@
 // server/src/snapshot.rs
-use crate::dgs_network::{BrockerManager, NetworkIdComponent, ServerStats};
-use crate::dgs_to_dgs_message::{FullEntityMetaData, FullEntityState};
-use crate::events::{AssignedChunks, Authority, FastMap};
-use crate::game::{ClientDirectory, ControlledBy};
+use crate::dgs_entity_functions::{
+    Authority, ControlledBy, EntityTypeComponent, InputComponent, NetworkIdComponent,
+};
+use crate::dgs_network::{BrockerManager, ServerStats};
+use crate::events::{AssignedChunks, FastMap};
+use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
-use core_types::chunks::{GameChunk, GameChunkAera};
+use core_types::chunks::GameChunk;
 use core_types::get_chunk;
-use game_message::core_types::SerializedGameChunkAera;
 use game_message::msg_client_server::*;
 use game_message::msg_dgs;
+use game_message::msg_entities::{EntityData, NetComponent};
 
 pub struct SnapshotPlugin;
 
@@ -21,7 +23,7 @@ impl Plugin for SnapshotPlugin {
         app.add_systems(
             PostUpdate,
             (
-                update_and_send_autority_pre_snapshot,
+                update_and_send_authority_pre_snapshot,
                 broadcast_snapshots,
                 update_existence,
             )
@@ -32,16 +34,23 @@ impl Plugin for SnapshotPlugin {
 }
 
 // gère le passage de margins. Actuellement : pas de marge. Si dans ghost chunk, alors handoff.
-fn update_and_send_autority_pre_snapshot(
+fn update_and_send_authority_pre_snapshot(
     broker: Res<BrockerManager>,
     chunk_assigned: ResMut<AssignedChunks>,
-    mut query_entities: Query<(&Transform, &ControlledBy, &mut Authority)>,
+    mut query_entities: Query<(
+        &Transform,
+        &ControlledBy,
+        &NetworkIdComponent,
+        &EntityTypeComponent,
+        &InputComponent,
+        &mut Authority,
+    )>,
 ) {
     let chunk_size = chunk_assigned.chunk_size;
     let my_chunks = &chunk_assigned.assigned_chunks;
 
     let mut handoffmap = FastMap::default();
-    for (transform, owner, mut auth) in query_entities.iter_mut() {
+    for (transform, owner, ett_net_id, entity, inputs, mut auth) in query_entities.iter_mut() {
         if *auth != Authority::Authoritative {
             continue;
         }
@@ -50,35 +59,39 @@ fn update_and_send_autority_pre_snapshot(
         let entity_chunk = get_chunk(translation[0], translation[1], chunk_size);
         if !my_chunks.contains(&entity_chunk) {
             *auth = Authority::LastAuthFrame;
+        } else {
+            continue;
         }
-        let entity_meta_data = FullEntityMetaData {
-            entity_type: 0,
-            health: 0,
-            extra_data: vec![],
-        };
 
-        let entity_data = FullEntityState {
-            network_entity_id: 0,
-            owner_node_id: owner.client_id,
-            position: translation.to_array(),
-            velocity: [0.0, 0.0],
-            meta_data: entity_meta_data,
+        let mut updates: Vec<NetComponent> = Vec::new();
+        updates.push((*owner).into());
+        updates.push((*ett_net_id).into());
+        updates.push(NetComponent::Position(core_types::Vec2::new(
+            translation.x,
+            translation.y,
+        )));
+        updates.push(NetComponent::Type(entity.0));
+        updates.push(NetComponent::Inputs(inputs.input_buffer.clone()));
+        updates.push(NetComponent::Velocity(core_types::Vec2::new(0.0, 0.0)));
+
+        let entity_data = EntityData {
+            net_id: ett_net_id.0,
+            owner_id: owner.client_id,
+            updates,
         };
+        println!(
+            "Relieving Author of Ett {} for {:?}",
+            ett_net_id.0, entity_chunk
+        );
 
         handoffmap
             .entry(entity_chunk)
             .or_insert_with(Vec::new)
-            .push(bitcode::encode(&entity_data));
+            .push(entity_data);
     }
 
-    for (chunk, vec_of_serialized_entities) in handoffmap {
-        let message = msg_dgs::EntityStateTransferHandoff {
-            chunk_handoff: false,
-            entity_handoff: true,
-            origin_aera: SerializedGameChunkAera::from(GameChunkAera::from(chunk)),
-            old_owner: broker.client.node_id,
-            data: vec_of_serialized_entities,
-        };
+    for (chunk, data) in handoffmap {
+        let message = msg_dgs::EntityHandOff { data };
 
         broker.client.publish_reliable(
             TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ChunkEntityHandOff)
@@ -93,7 +106,13 @@ fn broadcast_snapshots(
     net: ResMut<BrockerManager>,
     _server_data: ResMut<ServerStats>,
     chunk_assigned: ResMut<AssignedChunks>,
-    query_all_entities: Query<(&NetworkIdComponent, &ControlledBy, &Transform, &Authority)>,
+    query_all_entities: Query<(
+        &NetworkIdComponent,
+        &ControlledBy,
+        &Transform,
+        &Authority,
+        &EntityTypeComponent,
+    )>,
 ) {
     if !net.client.is_connected() {
         return;
@@ -107,55 +126,68 @@ fn broadcast_snapshots(
     }
 
     // Pré-calcul de l'état du monde ---
-    let mut precomputed_targets: FastMap<GameChunk, Vec<EntitySnapshot>> = FastMap::default();
+    let mut precomputed_targets: FastMap<GameChunk, PersonalSnapshot> = FastMap::default();
 
-    for (net_id, owner, transform, auth) in query_all_entities.iter() {
+    for (net_id, owner, transform, auth, entity_type) in query_all_entities.iter() {
         if *auth == Authority::Ghost {
             continue;
         }
 
         let trans = transform.translation.truncate().to_array();
-        let entity_snapshot = EntitySnapshot {
-            network_id: net_id.0,
+        let replicated_components = vec![
+            NetComponent::Velocity(core_types::Vec2::new(0.0, 0.0)),
+            NetComponent::Position(core_types::Vec2::new(
+                transform.translation.x,
+                transform.translation.y,
+            )),
+            NetComponent::Type(entity_type.0),
+        ];
+
+        let entity_snapshot = EntityData {
+            net_id: net_id.0,
             owner_id: owner.client_id,
-            position: trans,
+            updates: replicated_components,
         };
         let entity_chunk = get_chunk(trans[0], trans[1], chunk_size);
+
         precomputed_targets
             .entry(entity_chunk)
-            .or_insert_with(Vec::new)
+            .or_insert(PersonalSnapshot { entities: vec![] })
+            .entities
             .push(entity_snapshot);
     }
 
     for (chunk, snapshot) in precomputed_targets.iter() {
-        let personal_snapshot = PersonalSnapshot {
-            entities: snapshot.clone(),
-        };
         let topic = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk)
             .append_chunk(&chunk)
             .build();
-        let msg = SnapshotMsg {
-            snapshot: personal_snapshot,
-        };
-        net.client.publish_unreliable(topic, &msg);
+
+        net.client.publish_unreliable(topic, snapshot);
     }
 }
 
-// 3 cas possibles :
+// 3 cas possibles : (en fait on recevra pas les infos je crois)
 //      -- dans mes chunks : authoritative
 //      -- dans mes ghost chunks : ghost
 //      -- ailleurs : despawn
 fn update_existence(
     mut commands: Commands,
     chunk_assigned: ResMut<AssignedChunks>,
-    mut query_entities: Query<(Entity, &Transform, &ControlledBy, &mut Authority)>,
+    mut query_entities: Query<(
+        Entity,
+        &NetworkIdComponent,
+        &Transform,
+        &ControlledBy,
+        &mut Authority,
+    )>,
     mut client_directory: ResMut<ClientDirectory>,
+    mut entity_directory: ResMut<EntityDirectory>,
 ) {
     let chunk_size = chunk_assigned.chunk_size;
     let my_chunks = &chunk_assigned.assigned_chunks;
     let my_ghost_chunks = &chunk_assigned.ghost_chunks;
 
-    for (entity, transform, owner, mut auth) in query_entities.iter_mut() {
+    for (entity, net_id, transform, owner, mut auth) in query_entities.iter_mut() {
         if *auth == Authority::LastAuthFrame {
             *auth = Authority::Ghost;
         }
@@ -169,9 +201,11 @@ fn update_existence(
                 .sessions
                 .get_mut(&owner.client_id)
                 .map(|entities| {
-                    entities.retain(|&e| e.0 != entity);
+                    entities.retain(|&e| e != net_id.0);
                 });
+            entity_directory.entities.remove(&net_id.0);
             commands.entity(entity).despawn();
+            println!("Delete ref to entity {:?}", entity);
         }
     }
 }

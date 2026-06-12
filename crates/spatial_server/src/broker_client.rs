@@ -6,10 +6,11 @@ use broker_protocol::topic_patterns::TopicPattern;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
-use game_message::GameMessageHeaders;
-use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, SnapshotMsg};
+use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, PersonalSnapshot};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
+use game_message::msg_entities::NetComponent;
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::GameMessageHeaders;
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -131,7 +132,7 @@ impl BrokerClient {
                         max_y: world_size,
                     };
 
-                    let bounds = map_size.as_chunk_aera(self.chunk_size);
+                    let bounds = map_size.bounding_chunk_aera(self.chunk_size);
 
                     let topic_pattern = TopicPattern::new()
                         .with_head(Namespace::Chunk, SecurityDomain::PublicReadPrivateWrite)
@@ -206,17 +207,18 @@ impl BrokerClient {
                         }
                         Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
                     },
-                    GameMessageHeaders::Snapshot => match payload.extract::<SnapshotMsg>() {
+                    GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
                         Ok(snapshot) => {
-                            println!("[Orchestrator] Snapshot received");
-                            for entity_snapshot in snapshot.snapshot.entities {
-                                let entity = Entity::new(
-                                    entity_snapshot.network_id,
-                                    Vec2::new(
-                                        entity_snapshot.position[0],
-                                        entity_snapshot.position[1],
-                                    ),
-                                );
+                            //println!("[Orchestrator] Snapshot received");
+                            for entity_snapshot in snapshot.entities {
+                                let mut pos = Vec2::new(0.0, 0.0);
+                                for comp in entity_snapshot.updates {
+                                    if let NetComponent::Position(comp_pos) = comp {
+                                        pos = comp_pos;
+                                        break;
+                                    }
+                                }
+                                let entity = Entity::new(entity_snapshot.net_id, pos);
                                 //println!("Entity ID {}", entity_snapshot.network_id);
                                 if let Some(quad_tree) = quad_tree {
                                     quad_tree.insert(entity, shard_manager, self);
@@ -334,12 +336,15 @@ impl BrokerClient {
         }
     }
 
-    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
         println!("Assign areas {:?} to DGS {}", areas, dgs_id);
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
-
+        for (rect, _) in areas.iter_mut() {
+            rect.max_y -= f32::MIN_POSITIVE;
+            rect.max_x -= f32::MIN_POSITIVE;
+        }
         let chunk_hand_off = ChunkHandOff {
             action: ChunkHandOffAction::TakeArea,
             areas,
@@ -348,10 +353,15 @@ impl BrokerClient {
         self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 
-    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
+
+        for (rect, _) in areas.iter_mut() {
+            rect.max_y -= f32::MIN_POSITIVE;
+            rect.max_x -= f32::MIN_POSITIVE;
+        }
 
         let chunk_hand_off = ChunkHandOff {
             action: ChunkHandOffAction::ReleaseArea,

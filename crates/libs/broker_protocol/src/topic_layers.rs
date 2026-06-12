@@ -8,7 +8,6 @@ pub trait IntoTopicLayers {
 
 //GAMEPLAY OBJECTS IMPLEMENTATION
 
-
 impl IntoTopicLayers for GameChunkAera {
     fn into_layers(self) -> Vec<TopicLayer> {
         vec![
@@ -23,6 +22,23 @@ impl<T: IntoTopicLayer> IntoTopicLayers for Vec<T> {
         self.into_iter().map(|item| item.into_layer()).collect()
     }
 }
+impl IntoTopicLayer for Vec<GameChunk> {
+    fn into_layer(self) -> TopicLayer {
+        let mut list_of_fixed = Vec::with_capacity(self.len());
+
+        for item in self {
+            // ListOfFixed nécessite des Vec<u8> bruts.
+            // On extrait donc la valeur Fixed des éléments fournis.
+            match item.into_layer() {
+                TopicLayer::Fixed(bytes) => list_of_fixed.push(bytes),
+                _ => panic!("AnyOf ne supporte que des objets générant un TopicLayer::Fixed (ex: GameChunk)"),
+            }
+        }
+
+        TopicLayer::ListOfFixed(list_of_fixed)
+    }
+}
+
 impl IntoTopicLayer for GameChunk {
     fn into_layer(self) -> TopicLayer {
         let le_x = self.x.to_le_bytes();
@@ -42,6 +58,8 @@ impl IntoTopicLayer for &GameChunk {
 pub enum TopicLayer {
     /// Ajoute des octets fixes exacts (ex: le base_byte, ou un sous-topic fixe)
     Fixed(Vec<u8>),
+    /// ajoute Une liste de
+    ListOfFixed(Vec<Vec<u8>>),
     RangeU8(u8, u8),
     RangeU16(u16, u16),
     RangeU32(u32, u32),
@@ -49,6 +67,7 @@ pub enum TopicLayer {
     RangeI16(i16, i16),
     /// Génère une boucle sur une liste d'octets (ex: [Movement, Combat])
     ListU8(Vec<u8>),
+    //
 }
 
 impl TopicLayer {
@@ -89,6 +108,14 @@ impl TopicLayer {
                 buf.put_u8(0x07);
                 buf.put_u8(bytes.len() as u8);
                 buf.put_slice(bytes);
+            }
+            Self::ListOfFixed(list) => {
+                buf.put_u8(0x08);
+                buf.put_u8(list.len() as u8);
+                for item in list {
+                    buf.put_u8(item.len() as u8);
+                    buf.put_slice(item);
+                }
             }
         }
     }
@@ -165,6 +192,30 @@ impl TopicLayer {
                     ));
                 }
                 Ok(Self::ListU8(payload.split_to(len).to_vec()))
+            }
+            0x08 => {
+                //ListOfFixed
+                if payload.remaining() < 1 {
+                    return Err(ProtocolError::MalformedData(
+                        "Taille manquante pour ListOdFixed",
+                    ));
+                }
+                let fixed_cound: u8 = payload.get_u8();
+                let mut list = Vec::with_capacity(fixed_cound as usize);
+                for _ in 0..fixed_cound {
+                    if payload.remaining() < 1 {
+                        return Err(ProtocolError::MalformedData(
+                            "Taille manquante pour ListOdFixed",
+                        ));
+                    }
+                    let fixed_len = payload.get_u8();
+                    if payload.remaining() < fixed_len as usize {
+                        return Err(ProtocolError::MalformedData("Taille manquante pour ListOdFixed"));
+                    }
+                    list.push( payload.split_to(fixed_len as usize).to_vec());
+                }
+
+                Ok(Self::ListOfFixed(list))
             }
             _ => Err(ProtocolError::MalformedData("Tag TopicLayer inconnu")),
         }

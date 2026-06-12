@@ -8,3 +8,4 @@ path = "src/math.rs"
 
 [dependencies]
 bitcode = { workspace = true }
+rustc-hash = { version = "2.1", default-features = false, features = ["std"] }

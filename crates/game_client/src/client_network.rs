@@ -1,17 +1,21 @@
-﻿use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
-use crate::PlayerBundle;
+﻿use crate::client_helper::{insert_net_component, update_net_component};
+use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
+use crate::RootBundle;
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;
 use bevy::mesh::{Mesh, Mesh2d};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
-use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION};
+use broker_protocol::topics::{
+    Namespace, SecurityDomain, TopicBuilder, AUTH_FREE_NAMESPACE_FOR_CLIENTS_CONNEXION,
+};
 use core_types::chunks::GameChunkAera;
 use core_types::get_chunk;
 use game_message::msg_client_server::*;
-use game_message::msg_entities::NetworkEntityId;
+use game_message::msg_entities::{EntityData, NetComponent, NetworkEntityId};
 use game_message::GameMessageHeaders;
+use std::mem;
 
 #[derive(Component)]
 struct NetIdComp(NetworkEntityId);
@@ -90,24 +94,33 @@ fn network_bridge_system(
                 stream: _,
                 mut payload,
             } => match payload.header {
-                GameMessageHeaders::ClientWelcome => {
-                    let msg = payload.extract::<ClientWelcomeMsg>();
-                    match msg {
-                        Ok(msg) => {
-                            local_player.chunk = msg.chunk;
-                            local_player.net_id = msg.client_id;
-                            chunking.chunk_size = msg.chunk_size;
-                            println!("[Client] Got welcome message (ID: {})", msg.client_id);
-                            next_state.set(ClientState::InGame);
+                GameMessageHeaders::ClientWelcome => match payload.extract::<ClientWelcomeMsg>() {
+                    Ok(msg) => {
+                        local_player.chunk = msg.chunk;
+                        local_player.net_id = msg.client_id;
+                        chunking.chunk_size = msg.chunk_size;
+                        println!("[Client] Got welcome message (ID: {})", msg.client_id);
+
+                        let mut borders = GameChunkAera::from(msg.chunk).get_borders(1);
+                        borders.push(msg.chunk.clone());
+                        let topic_builder = TopicBuilder::new(
+                            SecurityDomain::PublicReadPrivateWrite,
+                            Namespace::Chunk,
+                        );
+
+                        for border_chunk in borders {
+                            let topic = topic_builder.clone().append_chunk(&border_chunk).build();
+                            net.client.subscribe(topic, 0);
                         }
-                        Err(e) => {
-                            println!("[Client] Got welcome error: {}", e);
-                        }
+                        next_state.set(ClientState::InGame);
                     }
-                }
-                GameMessageHeaders::Snapshot => match payload.extract::<SnapshotMsg>() {
+                    Err(e) => {
+                        println!("[Client] Got welcome error: {}", e);
+                    }
+                },
+                GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
                     Ok(snapshot) => {
-                        msg_snapshot.write(SnapshotMessage(snapshot.snapshot));
+                        msg_snapshot.write(SnapshotMessage(snapshot));
                     }
                     Err(e) => {
                         eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
@@ -141,26 +154,45 @@ fn process_snapshots(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut query_net_entities: Query<(Entity, &NetIdComp, &mut Transform)>,
 ) {
-    let mut entity_to_spawn: Vec<EntitySnapshot> = Vec::new();
+    let mut entity_to_spawn: Vec<EntityData> = Vec::new();
     // On récupère tout les snapshot reçu lors de cette frame
     for msg in reader.read() {
         let snapshot = msg.0.clone();
-        for net_entity in snapshot.entities {
+        for mut net_entity in snapshot.entities {
             let existing_entity = query_net_entities
                 .iter_mut()
-                .find(|(_, existing_id, _)| existing_id.0 == net_entity.network_id);
+                .find(|(_, existing_id, _)| existing_id.0 == net_entity.net_id);
 
-            if let Some((_, _, mut transform)) = existing_entity {
-                transform.translation.x = net_entity.position[0];
-                transform.translation.z = net_entity.position[1];
+            if let Some((ett, _, mut transform)) = existing_entity {
+                for comp in net_entity.updates {
+                    match comp {
+                        NetComponent::Position(position) => {
+                            transform.translation.x = position.x;
+                            transform.translation.y = position.y;
+                        }
+                        _ => {
+                            update_net_component(ett, &comp, &mut commands);
+                        }
+                    }
+                }
                 continue;
             }
 
-            let index_of_spawnentity = entity_to_spawn
+            let index_of_spaw_nentity = entity_to_spawn
                 .iter()
-                .position(|e| e.network_id == net_entity.network_id);
-            if let Some(index) = index_of_spawnentity {
-                entity_to_spawn.remove(index);
+                .position(|e| e.net_id == net_entity.net_id);
+            if let Some(index) = index_of_spaw_nentity {
+                let rslt = entity_to_spawn.remove(index);
+                for comp in rslt.updates {
+                    if net_entity
+                        .updates
+                        .iter()
+                        .find(|&f| mem::discriminant(f) == mem::discriminant(&comp))
+                        .is_none()
+                    {
+                        net_entity.updates.push(comp); //on ne garde que les composants qui n'ont pas été plus tard.
+                    }
+                }
             }
 
             entity_to_spawn.push(net_entity);
@@ -168,12 +200,16 @@ fn process_snapshots(
     }
 
     for entity in entity_to_spawn {
-        println!("Nouvelle entité réseau découverte : {}", entity.network_id);
+        println!(
+            "Nouvelle entité réseau découverte : {} de {}",
+            entity.net_id, entity.owner_id
+        );
+        println!("(je suis {})", broker.client.node_id.unwrap_or(0));
 
         let i_am_owner = entity.owner_id == broker.client.node_id.unwrap_or(0);
 
         if i_am_owner {
-            local_player.entity_net_id = Some(entity.network_id);
+            local_player.entity_net_id = Some(entity.net_id);
         }
 
         let spawn_color = if i_am_owner {
@@ -183,42 +219,53 @@ fn process_snapshots(
         };
 
         let bundle_to_spawn = (
-            PlayerBundle {
+            RootBundle {
                 mesh: Mesh2d(meshes.add(Circle::new(10.0))),
                 material: MeshMaterial2d(materials.add(spawn_color)),
-                transform: Transform::from_xyz(entity.position[0], entity.position[1], 0.0),
             },
-            NetIdComp(entity.network_id),
+            NetIdComp(entity.net_id),
         );
 
         let mut entity_handle = commands.spawn(bundle_to_spawn);
+        for component in entity.updates {
+            insert_net_component(&mut entity_handle, &component)
+        }
+
         if i_am_owner {
             entity_handle.insert(LocalControlledComponent);
         }
     }
 }
 
-
 fn what_is_my_chunks(
-    broker : Res<NetworkManager>,
-    my_entity : Query<&Transform, With<LocalControlledComponent>>,
-    chunking: Res<Chunking>
+    broker: Res<NetworkManager>,
+    my_entity: Query<&Transform, With<LocalControlledComponent>>,
+    chunking: Res<Chunking>,
+    mut local_player: ResMut<LocalPlayer>,
 ) {
-
     my_entity.iter().for_each(|transform| {
-        let c_chunk = get_chunk(transform.translation.x, transform.translation.y,  chunking.chunk_size);
+        let c_chunk = get_chunk(
+            transform.translation.x,
+            transform.translation.y,
+            chunking.chunk_size,
+        );
 
-        let borders = GameChunkAera::from(c_chunk).get_borders();
+        if c_chunk != local_player.chunk {
+            local_player.chunk = c_chunk;
+            let mut borders = GameChunkAera::from(c_chunk).get_borders(1);
+            borders.push(c_chunk.clone());
+            let topic_builder =
+                TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk);
 
-        let topic_builder = TopicBuilder::new(SecurityDomain::PublicReadPrivateWrite,Namespace::Chunk);
+            for border_chunk in borders {
+                let topic = topic_builder.clone().append_chunk(&border_chunk).build();
+                broker.client.subscribe(topic, 0);
+            }
 
-        for border_chunk in borders {
-
-            let topic = topic_builder.clone().append_chunk(&border_chunk).build();
-            broker.client.subscribe(topic, 0);
-
+            println!(
+                "Je suis maintenant dans le chunk ({}, {})",
+                c_chunk.x, c_chunk.y
+            );
         }
-
     })
-
 }

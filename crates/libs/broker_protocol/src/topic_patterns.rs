@@ -83,6 +83,12 @@ impl TopicPattern {
                     let next_builder = current_builder.clone().append(&[val]);
                     self.unpack_recursive(next_builder, layer_idx + 1, cb);
                 }
+            },
+            TopicLayer::ListOfFixed(lists) => {
+                for val in lists.iter() {
+                    let next_builder = current_builder.clone().append(val);
+                    self.unpack_recursive(next_builder, layer_idx + 1, cb);
+                }
             }
         }
     }
@@ -105,8 +111,8 @@ impl TopicPattern {
         self
     }
 
-    pub fn with_range(mut self, range: impl IntoTopicLayer) -> Self {
-        self.0.push(range.into_layer());
+    pub fn with_single_layer(mut self, layer: impl IntoTopicLayer) -> Self {
+        self.0.push(layer.into_layer());
         self
     }
 

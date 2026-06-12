@@ -1,12 +1,10 @@
-use crate::core_types::SerializedGameChunkAera;
-use crate::{
-    impl_bitcode_net_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo,
-};
+use crate::{impl_bitcode_encode_decode, impl_game_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
 use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use core_types::chunks::GameChunk;
+use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::Rect;
+use crate::msg_entities::EntityData;
 
 #[derive(Decode, Encode, Debug)]
 pub enum ChunkHandOffAction {
@@ -15,17 +13,15 @@ pub enum ChunkHandOffAction {
     AreaTook,    //A DGS tells to another DGS : I be ready. Do one last broadcast and then stop.
     ReleaseArea, // NOT IMPLEMENTED YET (TODOWHAT ?)
 }
-
-impl_bitcode_net_message!(ChunkHandOffAction, GameMessageHeaders::DiscardedMessageBecauseYouKnow);
-
+impl_bitcode_encode_decode!(ChunkHandOffAction);
 
 #[derive(Decode, Encode, Debug)]
 pub struct ChunkHandOff {
     pub action: ChunkHandOffAction,
     pub areas: Vec<(Rect,Option<NodeId>)>,
 }
-
-impl_bitcode_net_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
+impl_bitcode_encode_decode!(ChunkHandOff);
+impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
 
 #[derive(Debug, Decode, Encode, Clone)]
 pub struct Heartbeat {
@@ -40,7 +36,8 @@ pub struct Heartbeat {
 pub struct HeartbeatMessage {
     pub heartbeat: Heartbeat,
 }
-impl_bitcode_net_message!(HeartbeatMessage, GameMessageHeaders::Heartbeat);
+impl_bitcode_encode_decode!(HeartbeatMessage);
+impl_game_message!(HeartbeatMessage, GameMessageHeaders::Heartbeat);
 
 pub struct SpawnClientMsg {
     pub client_id: NodeId,
@@ -108,15 +105,23 @@ impl NetRead for SpawnClientMsg {
 }
 
 #[derive(Debug, Decode, Encode, Clone)]
-pub struct EntityStateTransferHandoff {
-    pub entity_handoff : bool,
-    pub chunk_handoff : bool,
-    pub origin_aera: SerializedGameChunkAera,
+pub struct ChunkDataHandOff {
+    pub origin_aera: GameChunkAera,
     pub old_owner : Option<NodeId>,
-    pub data: Vec<Vec<u8>>, //géré directement par les DGS
+    pub data: Vec<EntityData>, //géré directement par les DGS
 }
+impl_bitcode_encode_decode!(ChunkDataHandOff);
+impl_game_message!(
+    ChunkDataHandOff,
+    GameMessageHeaders::ChunkDataHandOff
+);
 
-impl_bitcode_net_message!(
-    EntityStateTransferHandoff,
-    GameMessageHeaders::EntityStateTransferHandoff
+#[derive(Debug, Decode, Encode, Clone)]
+pub struct EntityHandOff {
+    pub data: Vec<EntityData>
+}
+impl_bitcode_encode_decode!(EntityHandOff);
+impl_game_message!(
+    EntityHandOff,
+    GameMessageHeaders::EntityHandOff
 );

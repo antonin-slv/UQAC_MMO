@@ -1,7 +1,7 @@
 // server/src/network.rs
 
 use crate::events;
-use crate::events::{EntityStateTransferEvent, SnapshotReceived};
+use crate::events::{AssignedChunks, ChunkTransferEvent, EntityTransferEvent, SnapshotReceived};
 use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
@@ -10,9 +10,9 @@ use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use events::{ChunkHandOffMessage, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_message::msg_client_server::*;
 use game_message::msg_dgs::{
-    ChunkHandOff, EntityStateTransferHandoff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
+    ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
 };
-use game_message::msg_entities::NetworkEntityId;
+use game_message::msg_entities::{NetworkEntityId};
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -23,14 +23,6 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 const SELF_UUID_ENV_NAME: &str = "SERVER_UUID";
 const HEARTBEAT_RATE_ENV_NAME: &str = "HEARTBEAT_INTERVAL";
 const MAX_PLAYER_PER_SERVER: &str = "MAX_PLAYER_PER_SERVER";
-
-#[derive(Component, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct NetworkIdComponent(pub NetworkEntityId);
-
-#[derive(Component)]
-pub struct ControlledBy {
-    pub client_id: NodeId,
-}
 
 #[derive(Resource)]
 pub struct NetworkIdGenerator {
@@ -188,7 +180,8 @@ impl Plugin for NetworkPlugin {
         app.add_message::<PlayerConnected>()
             .add_message::<PlayerDisconnected>()
             .add_message::<PlayerInputEvent>()
-            .add_message::<ChunkHandOffMessage>();
+            .add_message::<ChunkHandOffMessage>()
+            .add_message::<EntityTransferEvent>();
 
         app.add_systems(PreUpdate, network_bridge_system.in_set(NetworkSet));
         app.add_systems(Update, send_heartbeat_system.in_set(NetworkSet));
@@ -203,6 +196,7 @@ fn send_heartbeat_system(
     mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
     client_directory: ResMut<ClientDirectory>,
+    managed_chunks: Res<AssignedChunks>,
 ) {
     timer.timer.tick(time.delta());
 
@@ -211,7 +205,8 @@ fn send_heartbeat_system(
             id: server_info.uuid.to_string(),
             node_id: broker.client.node_id.unwrap_or(0),
             zone: server_info.zone.clone(),
-            player_count: client_directory.sessions.len(),
+            player_count: client_directory.sessions.len()
+                + (managed_chunks.assigned_chunks.len() > 0) as usize,
             max_players: server_info.max_players,
         };
 
@@ -231,7 +226,8 @@ fn network_bridge_system(
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
     mut msg_chunk_assigned: MessageWriter<ChunkHandOffMessage>,
-    mut msg_state_transfer: MessageWriter<EntityStateTransferEvent>,
+    mut msg_state_transfer: MessageWriter<ChunkTransferEvent>,
+    mut msg_entity_transfer: MessageWriter<EntityTransferEvent>,
     mut msg_snapshot: MessageWriter<SnapshotReceived>,
 ) {
     let broker_connect = &mut broker.client;
@@ -300,6 +296,7 @@ fn network_bridge_system(
                     &mut msg_connected,
                     &mut msg_chunk_assigned,
                     &mut msg_state_transfer,
+                    &mut msg_entity_transfer,
                     &mut msg_snapshot,
                 );
             }
@@ -314,7 +311,8 @@ fn route_message_events(
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
     msg_chunk_assigned: &mut MessageWriter<ChunkHandOffMessage>,
-    msg_state_transfer: &mut MessageWriter<EntityStateTransferEvent>,
+    msg_chunk_state_transfer: &mut MessageWriter<ChunkTransferEvent>,
+    msg_entity_transfer: &mut MessageWriter<EntityTransferEvent>,
     msg_snapshot: &mut MessageWriter<SnapshotReceived>,
 ) {
     match payload.header {
@@ -358,22 +356,31 @@ fn route_message_events(
             }
         },
 
-        GameMessageHeaders::EntityStateTransferHandoff => {
-            match payload.extract::<EntityStateTransferHandoff>() {
-                Ok(msg) => {
-                    msg_state_transfer.write(EntityStateTransferEvent { message: msg });
-                }
-                Err(e) => {
-                    println!("[Server] Parsing Error EntityStateTransferHandoff : {}", e);
-                }
-            }
-        }
-
-        GameMessageHeaders::Snapshot => match payload.extract::<SnapshotMsg>() {
+        GameMessageHeaders::ChunkDataHandOff => match payload.extract::<ChunkDataHandOff>() {
             Ok(msg) => {
-                msg_snapshot.write(SnapshotReceived {
-                    snapshot: msg.snapshot,
-                });
+                msg_chunk_state_transfer.write(ChunkTransferEvent { message: msg });
+            }
+            Err(e) => {
+                println!("[Server] Parsing Error EntityStateTransferHandoff : {}", e);
+            }
+        },
+
+        GameMessageHeaders::EntityHandOff => match payload.extract::<EntityHandOff>() {
+            Ok(message) => {
+                msg_entity_transfer.write(EntityTransferEvent { message });
+            }
+
+            Err(e) => {
+                println!(
+                    "[Server] Erreur de parsing du message EntityHandOff : {}",
+                    e
+                );
+            }
+        },
+
+        GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
+            Ok(msg) => {
+                msg_snapshot.write(SnapshotReceived { snapshot: msg });
             }
             Err(e) => {
                 println!("[Server] Erreur de parsing du message Snapshot : {}", e);

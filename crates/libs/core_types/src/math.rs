@@ -1,14 +1,22 @@
 use crate::chunks::{GameChunk, GameChunkAera};
 use bitcode::{Decode, Encode};
+use std::ops::MulAssign;
 
 pub mod chunks;
+pub mod helpers;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
 }
 
+impl MulAssign<f32> for Vec2 {
+    fn mul_assign(&mut self, rhs: f32) {
+        self.x *= rhs;
+        self.y *= rhs;
+    }
+}
 impl Vec2 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
@@ -73,25 +81,23 @@ impl Rect {
         ]
     }
 
-    pub fn get_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
-        let start_x = (self.min_x / chunk_size).floor() as i16;
-        let end_x = (self.max_x / chunk_size).floor() as i16;
+    pub fn get_bounding_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
+        let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
+        let chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
 
-        let start_y = (self.min_y / chunk_size).floor() as i16;
-        let end_y = (self.max_y / chunk_size).floor() as i16;
-
-        let total_chunks = ((end_x - start_x + 1) * (end_y - start_y + 1)) as usize;
+        let total_chunks =
+            0.max((chunk_max.x - chunk_min.x + 1) * (chunk_max.y - chunk_min.y + 1)) as usize;
         let mut chunks = Vec::with_capacity(total_chunks);
 
-        for y in start_y..=end_y {
-            for x in start_x..=end_x {
+        for y in chunk_min.y..=chunk_max.y {
+            for x in chunk_min.x..=chunk_max.x {
                 chunks.push(GameChunk { x, y });
             }
         }
         chunks
     }
 
-    pub fn as_chunk_aera(&self, chunk_size: f32) -> GameChunkAera {
+    pub fn bounding_chunk_aera(&self, chunk_size: f32) -> GameChunkAera {
         let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
         let chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
 

@@ -124,8 +124,8 @@ pub async fn run_spatial_auth_server() {
                                 //
                                 let pattern = TopicPattern::new()
                                     .with_head(Namespace::Chunk, SecurityDomain::PrivateRW)
-                                    .with_range(0u8..=10u8) // Exemple de range pour les chunks
-                                    .with_range(0u8..=10u8);
+                                    .with_single_layer(0u8..=10u8) // Exemple de range pour les chunks
+                                    .with_single_layer(0u8..=10u8);
 
                                 broker_api.batch_subscribe(pattern, 0);
                             } else {

@@ -1,11 +1,13 @@
-use crate::{impl_bitcode_net_message, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::{
+    impl_bitcode_encode_decode, NetRead, NetWrite, NetWriteTo
+    ,
+};
 use bitcode::{Decode, Encode};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::{Rect, Vec2};
 
-
-impl_bitcode_net_message!(Rect, GameMessageHeaders::DiscardedMessageBecauseYouKnow);
+impl_bitcode_encode_decode!(Rect);
 
 impl NetWrite for GameChunk {
     fn serialize(&self) -> Bytes {
@@ -34,39 +36,7 @@ impl NetRead for GameChunk {
     }
 }
 
-#[derive(Debug, Decode, Encode, Clone, Copy)]
-pub struct SerializedGameChunkAera {
-    x_min: i16,
-    x_max: i16,
-    y_min: i16,
-    y_max: i16,
-}
-
-impl From<GameChunkAera> for SerializedGameChunkAera {
-    fn from(value: GameChunkAera) -> Self {
-        Self {
-            x_min: value.x_min,
-            x_max: value.x_max,
-            y_min: value.y_min,
-            y_max: value.y_max,
-        }
-    }
-}
-impl Into<GameChunkAera> for SerializedGameChunkAera {
-    fn into(self) -> GameChunkAera {
-        GameChunkAera {
-            x_min: self.x_min,
-            x_max: self.x_max,
-            y_min: self.y_min,
-            y_max: self.y_max,
-        }
-    }
-}
-
-impl_bitcode_net_message!(
-    SerializedGameChunkAera,
-    GameMessageHeaders::DiscardedMessageBecauseYouKnow
-);
+impl_bitcode_encode_decode!(GameChunkAera);
 
 #[derive(Debug, Decode, Encode, Clone)]
 pub struct SerializedVec2 {

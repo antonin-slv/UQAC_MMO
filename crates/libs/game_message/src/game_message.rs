@@ -5,8 +5,8 @@ use bytes::{BufMut, Bytes, BytesMut};
 pub mod core_types;
 pub mod msg_client_server;
 pub mod msg_dgs;
-pub mod msg_servers;
 pub mod msg_entities;
+pub mod msg_servers;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,21 +15,20 @@ pub enum GameMessageHeaders {
     Snapshot = 0x04,    //the shards broadcast the state of the world
     ClientInput = 0x05, //client to Shard
 
-    ClientHello = 0x06,      // Client tells Hello
-    ClientWelcome = 0x07,    // Auth to client
-    SpawnClient = 0x08,      // Spatial tells DGS to spawn a client
-    ClientEntitySpawned = 0x09,//DGS tells client it spawned
+    ClientHello = 0x06,         // Client tells Hello
+    ClientWelcome = 0x07,       // Auth to client
+    SpawnClient = 0x08,         // Spatial tells DGS to spawn a client
+    ClientEntitySpawned = 0x09, //DGS tells client it spawned
 
-
-    Heartbeat = 0x0B,        //from shard => broker then broker => Orchestrator
+    Heartbeat = 0x0B, //from shard => broker then broker => Orchestrator
     SpawnServer = 0x0C,
     FriendHello = 0x0F, //When something that isn't a client says hello.
-
 
     //inter shard protocol
     ChunkHandOff = 0x10,
 
-    EntityStateTransferHandoff = 0x11, //during an handoff, transfers the hidden data.
+    ChunkDataHandOff = 0x11, //during an handoff, transfers the hidden data.
+    EntityHandOff = 0x12,    //transfers the entity
 
     DiscardedMessageBecauseYouKnow,
 }
@@ -48,11 +47,11 @@ impl From<u8> for GameMessageHeaders {
 
             0x0B => GameMessageHeaders::Heartbeat,
             0x0C => GameMessageHeaders::SpawnServer,
-
             0x0F => GameMessageHeaders::FriendHello,
 
             0x10 => GameMessageHeaders::ChunkHandOff,
-            0x11 => GameMessageHeaders::EntityStateTransferHandoff,
+            0x11 => GameMessageHeaders::ChunkDataHandOff,
+            0x12 => GameMessageHeaders::EntityHandOff,
 
             _ => GameMessageHeaders::DiscardedMessageBecauseYouKnow,
         }
@@ -114,16 +113,20 @@ impl GamePayload {
     }
 }
 
-
 #[macro_export]
-macro_rules! impl_bitcode_net_message {
+macro_rules! impl_game_message {
     ($msg_type:ty, $header_variant:path) => {
         impl $crate::GameMessage for $msg_type {
             fn header() -> $crate::GameMessageHeaders {
                 $header_variant
             }
         }
+    };
+}
 
+#[macro_export]
+macro_rules! impl_bitcode_encode_decode {
+    ($msg_type:ty) => {
         impl $crate::NetWriteTo for $msg_type {
             fn write_to(&self, buf: &mut bytes::BytesMut) {
                 use bytes::BufMut;
