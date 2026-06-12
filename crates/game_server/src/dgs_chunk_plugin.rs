@@ -141,8 +141,10 @@ fn handle_chunks_handoff_message(
                 println!("Received TakeArea Message");
                 for (aera, old_owner) in ev.message.areas.iter() {
                     println!("\t take {:?} from {:?}", aera, old_owner);
-
-                    let taken_chunk_aera = aera.as_chunk_aera(chunk_directory.chunk_size);
+                    
+                    let mut taken_chunk_aera = aera.bounding_chunk_aera(chunk_directory.chunk_size);
+                    taken_chunk_aera.x_max -= 1;
+                    taken_chunk_aera.y_max -= 1;
 
                     // 1. SÉPARATION STRICTE : CŒUR vs FRONTIÈRES
                     let mut new_border_chunks: Vec<GameChunk> = Vec::new();
@@ -252,7 +254,9 @@ fn handle_chunks_handoff_message(
                 println!("Received ReadyToTake message");
                 for (aera, dgs) in ev.message.areas.iter() {
                     println!("\t give  {:?} to {:?}", aera, dgs);
-                    let aera_as_chunk = aera.as_chunk_aera(chunk_directory.chunk_size);
+                    let mut aera_as_chunk = aera.bounding_chunk_aera(chunk_directory.chunk_size);
+                    aera_as_chunk.x_max -= 1;
+                    aera_as_chunk.y_max -= 1;
                     println!("\n={:?}", aera_as_chunk);
                     pending_transfers.aeras.push((aera_as_chunk, *dgs));
                 }
