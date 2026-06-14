@@ -7,7 +7,6 @@ pub mod redis_manager;
 pub struct ServerInfo {
     pub ip: String,
     pub port: u16,
-    pub zone: String,
 }
 
 // Client + Gatekeeper

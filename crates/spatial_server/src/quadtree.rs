@@ -112,7 +112,6 @@ impl QuadTree {
         shard_manager: &mut ShardManager,
         broker: &BrokerClient,
     ) {
-        println!("Managed subdivisions : {:?}", subdivided_shards);
         for (new_shard, parent) in subdivided_shards {
             let sub_shard = self.get_shard_bounds(&new_shard);
             if let Some((sub_shard_bounds, is_leaf)) = sub_shard {

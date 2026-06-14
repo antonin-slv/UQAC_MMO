@@ -160,15 +160,9 @@ impl ShardManager {
 
     pub fn set_entity_shard(&mut self, shard_id: ShardId, entity: Entity) {
         let old_shard_id = self.get_shard(entity.id);
-        println!("Entities : {:?}", self.entities);
-        println!(
-            "New Shard iD : {} / Old Shard ID: {:?}",
-            shard_id, old_shard_id
-        );
         if let Some(old_shard_id) = old_shard_id
             && old_shard_id != shard_id
         {
-            println!("Remove from old shard");
             self.remove_entity_from_shard(old_shard_id, entity.id);
         }
 
@@ -176,7 +170,7 @@ impl ShardManager {
 
         let shard = self.shards.get_mut(&shard_id);
         if let Some(shard) = shard {
-            shard.entities.insert(entity);
+            shard.entities.replace(entity);
         } else {
             let mut entities = HashSet::new();
             entities.insert(entity);

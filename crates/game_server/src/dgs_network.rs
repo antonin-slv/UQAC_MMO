@@ -2,7 +2,6 @@
 
 use crate::events;
 use crate::events::{AssignedChunks, ChunkTransferEvent, EntityTransferEvent, SnapshotReceived};
-use crate::game::ClientDirectory;
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
@@ -12,7 +11,7 @@ use game_message::msg_client_server::*;
 use game_message::msg_dgs::{
     ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
 };
-use game_message::msg_entities::{NetworkEntityId};
+use game_message::msg_entities::NetworkEntityId;
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -195,7 +194,6 @@ fn send_heartbeat_system(
     broker: ResMut<BrockerManager>,
     mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
-    client_directory: ResMut<ClientDirectory>,
     managed_chunks: Res<AssignedChunks>,
 ) {
     timer.timer.tick(time.delta());
@@ -204,10 +202,7 @@ fn send_heartbeat_system(
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
             node_id: broker.client.node_id.unwrap_or(0),
-            zone: server_info.zone.clone(),
-            player_count: client_directory.sessions.len()
-                + (managed_chunks.assigned_chunks.len() > 0) as usize,
-            max_players: server_info.max_players,
+            chunk_managed: managed_chunks.assigned_chunks.len(),
         };
 
         let heartbeat = HeartbeatMessage { heartbeat };

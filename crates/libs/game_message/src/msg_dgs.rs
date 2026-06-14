@@ -27,9 +27,7 @@ impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
 pub struct Heartbeat {
     pub id: String,
     pub node_id: NodeId,
-    pub zone: String,
-    pub player_count: usize,
-    pub max_players: usize,
+    pub chunk_managed: usize
 }
 
 #[derive(Debug, Decode, Encode, Clone)]

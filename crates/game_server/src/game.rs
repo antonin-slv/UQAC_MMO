@@ -168,7 +168,7 @@ fn simulate_game(mut query: Query<(&mut Transform, &Authority, &EntityTypeCompon
         //todo : faire le jeu
         if !entity_type.0.is_static() {
             if *autority == Authority::Authoritative {
-                transform.translation += Vec3::new(0.0, 0.5, 0.0);
+                //transform.translation += Vec3::new(0.0, 0.5, 0.0);
             }
         }
     }

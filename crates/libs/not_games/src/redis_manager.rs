@@ -10,20 +10,16 @@ pub struct GameServer {
     pub id: String,
     pub address: String,
     pub port: u16,
-    pub area: String,
-    pub players_online: u32,
-    pub players_max: u32,
+    pub chunk_managed: usize,
 }
 
 impl GameServer {
-    pub fn new(id: String, players_max: u32, port: u16) -> Self {
+    pub fn new(id: String, port: u16) -> Self {
         Self {
             id,
             address: env::var("HOST_ADDRESS").expect("Env HOST_ADDRESS is not set"),
-            players_max,
-            players_online: 0,
             port,
-            area: "NA".to_string(),
+            chunk_managed: 0,
         }
     }
 }
@@ -58,7 +54,7 @@ impl RedisManager {
             ExpireOption::NONE,
             server.id.as_str(),
         )
-            .await?;
+        .await?;
 
         Ok(())
     }
@@ -96,7 +92,7 @@ impl RedisManager {
     pub async fn get_available_servers(&self) -> Result<Vec<GameServer>> {
         let mut servers = self.get_all_servers().await?;
 
-        servers.retain(|server| server.players_online == 0);
+        servers.retain(|server| server.chunk_managed == 0);
 
         Ok(servers)
     }
@@ -110,14 +106,7 @@ impl RedisManager {
     }
 
     pub async fn create_server(&self, id: String, port: u16) -> Result<GameServer> {
-        let new_server = GameServer::new(
-            id,
-            env::var("MAX_PLAYER_PER_SERVER")
-                .expect("Env MAX_PLAYER_PER_SERVER is not set")
-                .parse()
-                .expect("Max player per server is not a valid number"),
-            port,
-        );
+        let new_server = GameServer::new(id, port);
 
         self.update_server(&new_server).await?;
 

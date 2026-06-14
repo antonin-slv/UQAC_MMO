@@ -6,11 +6,11 @@ use broker_protocol::topic_patterns::TopicPattern;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
+use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, PersonalSnapshot};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_entities::NetComponent;
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
-use game_message::GameMessageHeaders;
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -18,7 +18,6 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 pub struct BrokerClient {
     broker_api: MmoNetworkClient,
     chunk_size: f32,
-    max_depth: u8,
     world_size: f32,
 }
 
@@ -66,7 +65,6 @@ impl BrokerClient {
         Self {
             broker_api: broker_client,
             world_size,
-            max_depth,
             chunk_size,
         }
     }
@@ -167,70 +165,71 @@ impl BrokerClient {
                     client_id,
                     stream: _,
                     mut payload,
-                } => match payload.header {
-                    GameMessageHeaders::ClientHello => match payload.extract::<ClientHelloMsg>() {
-                        Ok(msg) => {
-                            if let Some(quad_tree) = quad_tree {
-                                self.on_new_client_connected(
-                                    client_id,
-                                    quad_tree,
-                                    shard_manager,
-                                    msg,
-                                )
-                                .await;
-                            }
-                        }
-                        Err(e) => {
-                            println!("⚠️ [Auth] Message ClientHello mal formé : {}", e);
-                        }
-                    },
-                    GameMessageHeaders::FriendHello => match payload.extract::<ServerHelloMSG>() {
-                        Ok(friend) => {
-                            if let Some(quad_tree) = quad_tree {
-                                self.on_server_connected(friend, shard_manager, quad_tree)
+                } => {
+                    let Some(quad_tree) = quad_tree else {
+                        return false;
+                    };
+
+                    match payload.header {
+                        GameMessageHeaders::ClientHello => {
+                            match payload.extract::<ClientHelloMsg>() {
+                                Ok(msg) => {
+                                    self.on_new_client_connected(
+                                        client_id,
+                                        quad_tree,
+                                        shard_manager,
+                                        msg,
+                                    )
                                     .await;
+                                }
+                                Err(e) => {
+                                    println!("⚠️ [Auth] Message ClientHello mal formé : {}", e);
+                                }
                             }
                         }
-                        Err(e) => {
-                            println!("[DGS] DGS Connected error {}", e)
+                        GameMessageHeaders::FriendHello => {
+                            match payload.extract::<ServerHelloMSG>() {
+                                Ok(friend) => {
+                                    self.on_server_connected(friend, shard_manager, quad_tree)
+                                        .await
+                                }
+                                Err(e) => {
+                                    println!("[DGS] DGS Connected error {}", e)
+                                }
+                            }
                         }
-                    },
-                    GameMessageHeaders::Heartbeat => match payload.extract::<HeartbeatMessage>() {
-                        Ok(heartbeat) => {
-                            if let Some(quad_tree) = quad_tree {
-                                shard_manager.on_heartbeat_receive(
+                        GameMessageHeaders::Heartbeat => {
+                            match payload.extract::<HeartbeatMessage>() {
+                                Ok(heartbeat) => shard_manager.on_heartbeat_receive(
                                     heartbeat.heartbeat.node_id,
                                     quad_tree,
                                     self,
-                                )
+                                ),
+                                Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
                             }
                         }
-                        Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
-                    },
-                    GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
-                        Ok(snapshot) => {
-                            //println!("[Orchestrator] Snapshot received");
-                            for entity_snapshot in snapshot.entities {
-                                let mut pos = Vec2::new(0.0, 0.0);
-                                for comp in entity_snapshot.updates {
-                                    if let NetComponent::Position(comp_pos) = comp {
-                                        pos = comp_pos;
-                                        break;
+                        GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>()
+                        {
+                            Ok(snapshot) => {
+                                for entity_snapshot in snapshot.entities {
+                                    let mut pos = Vec2::new(0.0, 0.0);
+                                    for comp in entity_snapshot.updates {
+                                        if let NetComponent::Position(comp_pos) = comp {
+                                            pos = comp_pos;
+                                            break;
+                                        }
                                     }
-                                }
-                                let entity = Entity::new(entity_snapshot.net_id, pos);
-                                //println!("Entity ID {}", entity_snapshot.network_id);
-                                if let Some(quad_tree) = quad_tree {
+                                    let entity = Entity::new(entity_snapshot.net_id, pos);
                                     quad_tree.insert(entity, shard_manager, self);
                                 }
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
-                        }
-                    },
-                    _ => {}
-                },
+                            Err(e) => {
+                                eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
+                            }
+                        },
+                        _ => {}
+                    }
+                }
             }
         }
 

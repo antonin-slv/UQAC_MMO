@@ -133,23 +133,6 @@ services:
     container_name: spatial_server
     networks:
       - mmo_network
-  #smock_spatial_auth_server:
-  #  build:
-  #    context: .
-  #    dockerfile: Dockerfile
-  #  image: mock_spatial_auth_server
-  #  env_file:
-  #    - .env
-  #  depends_on:
-  #    - broker
-  #  restart: always
-  #  container_name: mock_spatial_auth_server
-  #  networks:
-  #    - mmo_network
-  #  ports:
-  #    - "3634:3634/udp"
-  #  volumes:
-  #    - /var/run/docker.sock:/var/run/docker.sock
 volumes:
   postgres_data:
   redis_data:
