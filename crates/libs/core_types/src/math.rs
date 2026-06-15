@@ -45,8 +45,14 @@ pub struct Rect {
 pub type OwnedArea = (u32, Vec<Rect>);
 
 impl Rect {
+    pub fn y_is_in(&self, y: f32) -> bool {
+        y >= self.min_y && y < self.max_y
+    }
+    pub fn x_is_in(&self, x: f32) -> bool {
+        x >= self.min_x && x < self.max_x
+    }
     pub fn contains(&self, p: Vec2) -> bool {
-        p.x >= self.min_x && p.x <= self.max_x && p.y >= self.min_y && p.y <= self.max_y
+        self.y_is_in(p.y) && self.x_is_in(p.x)
     }
 
     pub fn split(&self) -> [Rect; 4] {
@@ -83,7 +89,14 @@ impl Rect {
 
     pub fn get_bounding_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
         let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
-        let chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+
+        let mut chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+        if !self.y_is_in(self.max_y) {
+            chunk_max.y -= 1;
+        }
+        if !self.x_is_in(self.max_x) {
+            chunk_max.x -= 1;
+        }
 
         let total_chunks =
             0.max((chunk_max.x - chunk_min.x + 1) * (chunk_max.y - chunk_min.y + 1)) as usize;

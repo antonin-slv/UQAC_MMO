@@ -1,6 +1,6 @@
 use crate::dgs_entity_functions::{spawn_entity, Authority, EntityTypeComponent, InputComponent};
 use crate::dgs_network::BrockerManager;
-use crate::dgs_network::{NetworkIdGenerator};
+use crate::dgs_network::NetworkIdGenerator;
 use crate::events;
 use crate::events::AssignedChunks;
 use bevy::prelude::*;
@@ -148,7 +148,11 @@ fn update_inputs(
     }
 }
 
-fn apply_inputs(mut query: Query<(&mut Transform, &Authority, &InputComponent)>) {
+fn apply_inputs(
+    time: Res<Time<Fixed>>,
+    mut query: Query<(&mut Transform, &Authority, &InputComponent)>,
+) {
+    let delta_t = time.delta_secs();
     for (mut pos, auth, inputs) in query.iter_mut() {
         if *auth == Authority::Ghost {
             continue; // On n'applique les inputs que si le serveur a l'autorité
@@ -157,18 +161,18 @@ fn apply_inputs(mut query: Query<(&mut Transform, &Authority, &InputComponent)>)
         if let Some(last_input) = last_input {
             let xdiff = f32::from(last_input.1.right) - f32::from(last_input.1.left);
             let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
-            pos.translation.x += xdiff * 1.0;
-            pos.translation.y += ydiff * 1.0;
+            pos.translation.x += xdiff * 80.0 * delta_t;
+            pos.translation.y += ydiff * 80.0 * delta_t;
         }
     }
 }
 
 fn simulate_game(mut query: Query<(&mut Transform, &Authority, &EntityTypeComponent)>) {
-    for (mut transform, autority, entity_type) in query.iter_mut() {
+    for (_transform, autority, entity_type) in query.iter_mut() {
         //todo : faire le jeu
         if !entity_type.0.is_static() {
             if *autority == Authority::Authoritative {
-                transform.translation += Vec3::new(0.0, 0.5, 0.0);
+                //transform.translation += Vec3::new(0.0, 0.5, 0.0);
             }
         }
     }
