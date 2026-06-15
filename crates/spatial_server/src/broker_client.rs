@@ -202,6 +202,7 @@ impl BrokerClient {
                             match payload.extract::<HeartbeatMessage>() {
                                 Ok(heartbeat) => shard_manager.on_heartbeat_receive(
                                     heartbeat.heartbeat.node_id,
+                                    heartbeat.heartbeat.id,
                                     quad_tree,
                                     self,
                                 ),

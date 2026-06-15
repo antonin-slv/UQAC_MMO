@@ -16,6 +16,7 @@ pub struct ShardManager {
     pub entities: HashMap<NetworkEntityId, ShardId>,
     pub shards: HashMap<ShardId, Shard>,
     pub active_dgs: HashMap<NodeId, Option<ShardId>>,
+    pub dgs_containers: HashMap<NodeId, String>,
 }
 
 impl ShardManager {
@@ -24,12 +25,14 @@ impl ShardManager {
             entities: HashMap::new(),
             shards: HashMap::new(),
             active_dgs: HashMap::new(),
+            dgs_containers: HashMap::new(),
         }
     }
 
     pub fn on_heartbeat_receive(
         &mut self,
         new_dgs_id: NodeId,
+        container_id: String,
         quad_tree: &QuadTree,
         broker: &BrokerClient,
     ) {
@@ -39,6 +42,7 @@ impl ShardManager {
             return;
         }
 
+        self.dgs_containers.insert(new_dgs_id, container_id);
         self.on_new_dgs(new_dgs_id, quad_tree, broker);
     }
 
@@ -59,8 +63,6 @@ impl ShardManager {
         {
             old_dgs_id = shard.dgs;
         }
-
-        println!("Old DGS ID: {:?}", old_dgs_id);
 
         if let Some((new_dgs, _)) = self
             .active_dgs
@@ -193,13 +195,13 @@ impl ShardManager {
     }
 
     pub fn drain_entities(&mut self, shard_id: ShardId) -> HashSet<Entity> {
-        let shard = self.shards.get(&shard_id);
+        let shard = self.shards.get_mut(&shard_id);
 
         let mut entities = HashSet::new();
 
         if let Some(shard) = shard {
             entities = shard.entities.clone();
-            self.shards.remove(&shard_id);
+            shard.entities.clear();
         }
 
         entities

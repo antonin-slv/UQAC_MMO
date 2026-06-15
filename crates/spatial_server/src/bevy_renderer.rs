@@ -84,23 +84,28 @@ pub mod bevy_renderer {
                 Rot2::IDENTITY,
             );
             gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
+            let dgs = shard_manager
+                .shards
+                .get(&quad_tree.shard_id)
+                .unwrap_or(&Shard {
+                    dgs: Some(0),
+                    entities: HashSet::new(),
+                })
+                .dgs
+                .unwrap_or(0);
             gizmos.text_2d(
                 start,
                 format!(
-                    "{}\n{}",
+                    "{}\n{}\n{}",
                     quad_tree.shard_id,
+                    dgs,
                     shard_manager
-                        .shards
-                        .get(&quad_tree.shard_id)
-                        .unwrap_or(&Shard {
-                            dgs: Some(0),
-                            entities: HashSet::new()
-                        })
-                        .dgs
-                        .unwrap_or(0)
+                        .dgs_containers
+                        .get(&dgs)
+                        .unwrap_or(&"No container".to_string())
                 )
                 .as_str(),
-                16.0 - quad_tree.depth as f32,
+                13.0 - quad_tree.depth as f32,
                 Vec2::ZERO,
                 Color::WHITE,
             );
