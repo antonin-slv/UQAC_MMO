@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use broker_protocol::broker_message::NodeId;
-use core_types::chunks::{GameChunk, GameChunkAera};
+use core_types::chunks::{GameChunk};
 use game_message::msg_client_server::{InputBuffer, PersonalSnapshot};
 use game_message::msg_dgs::{ChunkDataHandOff, ChunkHandOff, EntityHandOff, SpawnClientMsg};
 use game_message::msg_entities::{NetworkEntityId};
@@ -51,7 +51,7 @@ pub struct EntityTransferEvent {
 
 #[derive(Resource, Default)]
 pub struct PendingChunkTransfersForOther {
-    pub aeras: Vec<(GameChunkAera, Option<NodeId>)>,
+    pub aeras: Vec<(core_types::Rect, Option<NodeId>)>,
 }
 
 #[derive(Message, Debug)]

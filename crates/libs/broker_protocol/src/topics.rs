@@ -37,7 +37,7 @@ pub enum Namespace {
     Chunk = 0x06,            // event linked to a specifi chunk + localisation
     ChunkEntityHandOff = 0x07,//When the Auth of the entity is sent to the targetChunk.
     SpatialInput = 0x11,     // Réception des inputs (lié à un chunk)
-    SpatialServer = 0x12,    // Réception des inputs (lié à un chunk)
+    SpatialServer = 0x12,    // Messages direct au spatial server
     Director = 0x30,         // general messages for servers (like an orchestra director)
     Heartbeat = 0x31,        // Heartbeat (from shard to broker, then broker to orchestrator)
 

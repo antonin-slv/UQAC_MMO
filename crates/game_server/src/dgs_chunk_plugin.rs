@@ -140,9 +140,11 @@ fn handle_chunks_handoff_message(
         match ev.message.action {
             // PHASE 1: Le Director nous dit de prendre une zone
             ChunkHandOffAction::TakeArea => {
-                println!("Received TakeArea Message");
                 for (aera, old_owner) in ev.message.areas.iter() {
-                    println!("\t take {:?} from {:?}", aera, old_owner);
+                    println!(
+                        "[GameServer] recv : \t take {:?} from {:?}",
+                        aera, old_owner
+                    );
 
                     let taken_chunk_aera = aera.bounding_chunk_aera(chunk_directory.chunk_size);
 
@@ -251,13 +253,13 @@ fn handle_chunks_handoff_message(
 
             // PHASE 2: Un autre serveur est prêt à prendre notre zone (Nous sommes le Source)
             ChunkHandOffAction::ReadyToTake => {
-                println!("Received ReadyToTake message");
-                for (aera, dgs) in ev.message.areas.iter() {
-                    println!("\t give  {:?} to {:?}", aera, dgs);
-                    let mut aera_as_chunk = aera.bounding_chunk_aera(chunk_directory.chunk_size);
-                    println!("\n={:?}", aera_as_chunk);
-                    pending_transfers.aeras.push((aera_as_chunk, *dgs));
+                let mut message = "Received ReadyToTake message".to_string();
+                for msg in ev.message.areas.iter() {
+                    message = format!("{}\n\t give  {:?} to {:?}", message, msg.0, msg.1);
+
+                    pending_transfers.aeras.push(*msg);
                 }
+                println!("[GameServer][{:?}]{}", broker.client.node_id, message);
             }
             ChunkHandOffAction::AreaTook => { /* Pour le spatial server */ }
             ChunkHandOffAction::ReleaseArea => { /* ... */ }
@@ -408,7 +410,8 @@ fn execute_outgoing_chunk_handoff_transfers(
 
     let mut lost_aeras_inner = Vec::new();
 
-    for (chunk_aera, target_dgs) in pending_transfers.aeras.drain(..1) {
+    for (real_aera, target_dgs) in pending_transfers.aeras.drain(..1) {
+        let chunk_aera = real_aera.bounding_chunk_aera(chunk_directory.chunk_size);
         println!(
             "Executing handoff transfer for area {:?} to DGS {:?}",
             chunk_aera, target_dgs
@@ -454,6 +457,19 @@ fn execute_outgoing_chunk_handoff_transfers(
             .build();
 
         broker.client.publish_reliable(topic_target, &handoff_msg);
+
+        //3. on préviens le spatial server :
+        let spatial_handoff_msg = ChunkHandOff {
+            action: ChunkHandOffAction::ReleaseArea,
+            areas: vec![(real_aera, broker.client.node_id)],
+        };
+
+        let topic_spatial_server =
+            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer).build();
+
+        broker
+            .client
+            .publish_reliable(topic_spatial_server, &spatial_handoff_msg);
 
         for chunk in chunk_aera.iter() {
             chunk_directory.assigned_chunks.remove(&chunk);
@@ -513,7 +529,7 @@ fn execute_outgoing_chunk_handoff_transfers(
         broker.client.batch_unsubscribe(chunk_topic_pattern, 0);
     }
 
-    //on se désincrit 
+    //on se désincrit
     let root_for_regular = vec![input_base_topic];
     for safe_regular_unsubscribe in lost_aeras_inner.iter() {
         let chunk_topic_pattern = TopicPattern::new()
