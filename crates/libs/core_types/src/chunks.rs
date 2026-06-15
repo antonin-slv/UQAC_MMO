@@ -150,9 +150,9 @@ impl GameChunkAera {
     pub fn to_core_rect(&self, size: f32) -> Rect {
         Rect {
             min_x: self.x_min as f32 * size,
-            max_x: self.x_max as f32 * size + size - f32::MIN_POSITIVE,
+            max_x: self.x_max as f32 * size + size,
             min_y: self.y_min as f32 * size,
-            max_y: self.y_max as f32 * size + size - f32::MIN_POSITIVE,
+            max_y: self.y_max as f32 * size + size,
         }
     }
 
