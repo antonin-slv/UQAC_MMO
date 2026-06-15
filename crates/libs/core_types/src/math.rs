@@ -89,31 +89,23 @@ impl Rect {
     }
 
     pub fn get_bounding_chunks(&self, chunk_size: f32) -> Vec<GameChunk> {
-        let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
-
-        let mut chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
-        if !self.y_is_in(self.max_y) {
-            chunk_max.y -= 1;
-        }
-        if !self.x_is_in(self.max_x) {
-            chunk_max.x -= 1;
-        }
-
-        let total_chunks =
-            0.max((chunk_max.x - chunk_min.x + 1) * (chunk_max.y - chunk_min.y + 1)) as usize;
-        let mut chunks = Vec::with_capacity(total_chunks);
-
-        for y in chunk_min.y..=chunk_max.y {
-            for x in chunk_min.x..=chunk_max.x {
-                chunks.push(GameChunk { x, y });
-            }
-        }
-        chunks
+        self.bounding_chunk_aera(chunk_size)
+            .iter()
+            .collect::<Vec<_>>()
     }
 
     pub fn bounding_chunk_aera(&self, chunk_size: f32) -> GameChunkAera {
         let chunk_min = get_chunk(self.min_x, self.min_y, chunk_size);
-        let chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+        let mut chunk_max = get_chunk(self.max_x, self.max_y, chunk_size);
+
+        let frac = (self.max_y / chunk_size).fract();
+        if frac <= f32::EPSILON {
+            chunk_max.y -= 1;
+        }
+        let frac = (self.max_x / chunk_size).fract();
+        if frac <= f32::EPSILON {
+            chunk_max.x -= 1;
+        }
 
         GameChunkAera {
             x_min: chunk_min.x,

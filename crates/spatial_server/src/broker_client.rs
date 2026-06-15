@@ -354,10 +354,6 @@ impl BrokerClient {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
-        for (rect, _) in areas.iter_mut() {
-            rect.max_y -= f32::MIN_POSITIVE;
-            rect.max_x -= f32::MIN_POSITIVE;
-        }
         let chunk_hand_off = ChunkHandOff {
             action: ChunkHandOffAction::TakeArea,
             areas,
@@ -370,11 +366,6 @@ impl BrokerClient {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();
-
-        for (rect, _) in areas.iter_mut() {
-            rect.max_y -= f32::MIN_POSITIVE;
-            rect.max_x -= f32::MIN_POSITIVE;
-        }
 
         let chunk_hand_off = ChunkHandOff {
             action: ChunkHandOffAction::ReleaseArea,

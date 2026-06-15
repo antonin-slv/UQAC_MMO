@@ -1,15 +1,44 @@
 ﻿use std::time::Instant;
 
-use core_types::chunks::GameChunk;
+use core_types::chunks::{get_chunk_size, GameChunk};
+use core_types::helpers::FastSet;
+use core_types::Rect;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::hint::black_box;
-use core_types::helpers::FastSet;
 
 fn hash_to_random(input: i32) -> u64 {
     let mut hasher = DefaultHasher::new();
     input.hash(&mut hasher);
     hasher.finish()
+}
+
+pub fn test_math() {
+    let world_size = 800.0;
+    let tree_depth = 1;
+    let chunk_size = get_chunk_size(world_size, tree_depth);
+    let rect = Rect {
+        min_x: -world_size / 2.0,
+        min_y: -world_size / 2.0,
+        max_x: world_size / 2.0,
+        max_y: world_size / 2.0,
+    };
+    println!("== TEST CHUNKS ==");
+
+    println!(
+        "{:?} -> {:?}\n\nand splits to\n",
+        rect,
+        rect.bounding_chunk_aera(chunk_size)
+    );
+
+    for mini_rect in rect.split() {
+        let as_chunk = mini_rect.bounding_chunk_aera(chunk_size);
+        println!("{:?} -> {:?}", mini_rect, as_chunk);
+        for mini_mini_rect in mini_rect.split() {
+            let as_chunk = mini_mini_rect.bounding_chunk_aera(chunk_size);
+            println!("\t\t{:?} -> {:?}", mini_mini_rect, as_chunk);
+        }
+    }
 }
 
 pub fn test_chunk_borders() {
@@ -29,7 +58,6 @@ pub fn test_chunk_borders() {
     println!("--- BENCHMARK TEMPOREL ---");
     println!("Lancement de {} itérations...", iterations);
 
-
     let chunks = chunks.as_slice();
 
     let start_time = Instant::now();
@@ -45,7 +73,6 @@ pub fn test_chunk_borders() {
     println!("GRID : Temps total     : {:?}", duration);
     println!("Temps moyen/ité : {:?}", duration / iterations);
     println!("--------------------------");
-
 }
 fn visualize_map(chunks: &[GameChunk], borders: FastSet<(i16, i16)>) {
     let chunk_set: FastSet<(i16, i16)> = chunks.iter().map(|c| (c.x, c.y)).collect();
@@ -65,9 +92,7 @@ fn visualize_map(chunks: &[GameChunk], borders: FastSet<(i16, i16)>) {
     }
 
     println!("--- VISUALISATION SPATIALE ---");
-    println!(
-        "Légende : 🟦 = Chunk  |  🟥 = Frontière (🟨 == both == problèmes)  |  ⬛ = Vide\n"
-    );
+    println!("Légende : 🟦 = Chunk  |  🟥 = Frontière (🟨 == both == problèmes)  |  ⬛ = Vide\n");
 
     // On dessine de haut en bas, de gauche à droite (avec une marge de 1)
     for y in (min_y - 1)..=(max_y + 1) {
