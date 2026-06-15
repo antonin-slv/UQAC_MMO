@@ -36,10 +36,11 @@ impl ShardManager {
         quad_tree: &QuadTree,
         broker: &BrokerClient,
     ) {
-        if let Some(shard) = self.active_dgs.get(&new_dgs_id)
-            && shard.is_some()
-        {
-            return;
+        if let Some(shard) = self.active_dgs.get_mut(&new_dgs_id) {
+            self.dgs_containers.insert(new_dgs_id, container_id.clone());
+            if shard.is_some() {
+                return;
+            }
         }
 
         self.dgs_containers.insert(new_dgs_id, container_id);
@@ -64,18 +65,7 @@ impl ShardManager {
             old_dgs_id = shard.dgs;
         }
 
-        if let Some((new_dgs, _)) = self
-            .active_dgs
-            .iter_mut()
-            .find(|(_, shard)| shard.is_none())
-        {
-            broker.assign_shard_to_dgs(new_dgs.clone(), vec![(bounds, old_dgs_id)]);
-            if let Some(shard) = self.shards.get_mut(&shard_id) {
-                shard.dgs = Some(new_dgs.clone());
-            }
-        }
-
-        if let None = self.shards.get(&shard_id) {
+        if !self.shards.contains_key(&shard_id) {
             self.shards.insert(
                 shard_id,
                 Shard {
@@ -83,6 +73,20 @@ impl ShardManager {
                     dgs: None,
                 },
             );
+        }
+
+
+        if let Some((new_dgs, dgs_shard)) = self
+            .active_dgs
+            .iter_mut()
+            .find(|(_, shard)| shard.is_none())
+        {
+            broker.assign_shard_to_dgs(new_dgs.clone(), vec![(bounds, old_dgs_id)]);
+            if let Some(shard) = self.shards.get_mut(&shard_id) {
+                println!("Shard {} assign to DGS {}", shard_id, new_dgs);
+                shard.dgs = Some(new_dgs.clone());
+            }
+            *dgs_shard = Some(shard_id);
         }
     }
 
@@ -138,6 +142,16 @@ impl ShardManager {
 
         if let Some(Some(shard_id)) = self.active_dgs.get_mut(&dgs_id) {
             if let Some(shard) = self.shards.get_mut(shard_id) {
+                shard.dgs = None;
+            }
+        }
+    }
+
+    pub fn on_area_released(&mut self, dgs_id: NodeId) {
+        for (_, shard) in self.shards.iter_mut() {
+            if let Some(shard_dgs) = shard.dgs
+                && shard_dgs == dgs_id
+            {
                 shard.dgs = None;
             }
         }

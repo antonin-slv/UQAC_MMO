@@ -110,14 +110,16 @@ impl BrokerClient {
                         0,
                     );
 
+                    self.broker_api.subscribe(auth_topic, 0);
+
                     self.broker_api.subscribe(
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
-                            .build(),
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build(),
                         0,
                     );
 
                     self.broker_api.subscribe(
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build(),
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer)
+                            .build(),
                         0,
                     );
 
@@ -226,6 +228,17 @@ impl BrokerClient {
                             }
                             Err(e) => {
                                 eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
+                            }
+                        },
+                        GameMessageHeaders::ChunkHandOff => match payload.extract::<ChunkHandOff>()
+                        {
+                            Ok(handoff) => {
+                                if handoff.action == ChunkHandOffAction::ReleaseArea {
+                                    shard_manager.on_area_released(client_id);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[Client] Erreur de parsing du Chunked Off : {}", e);
                             }
                         },
                         _ => {}

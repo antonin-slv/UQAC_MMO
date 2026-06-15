@@ -6,7 +6,7 @@ use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::Rect;
 use crate::msg_entities::EntityData;
 
-#[derive(Decode, Encode, Debug)]
+#[derive(Decode, Encode, Debug, PartialEq)]
 pub enum ChunkHandOffAction {
     TakeArea,    //asks a DGS to take a specific area from N someone
     ReadyToTake, //  this DGS tells another DGS : I'll take that (he answers with 1 serialisation of everything)
