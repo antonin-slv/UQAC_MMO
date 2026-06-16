@@ -1,24 +1,28 @@
-use crate::{impl_bitcode_encode_decode, impl_game_message, GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
+use crate::msg_entities::EntityData;
+use crate::{
+    impl_bitcode_encode_decode, impl_game_message, GameMessage, GameMessageHeaders, NetRead, NetWrite,
+    NetWriteTo,
+};
 use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
 use core_types::Rect;
-use crate::msg_entities::EntityData;
 
 #[derive(Decode, Encode, Debug, PartialEq)]
 pub enum ChunkHandOffAction {
-    TakeArea,    //asks a DGS to take a specific area from N someone
-    ReadyToTake, //  this DGS tells another DGS : I'll take that (he answers with 1 serialisation of everything)
-    AreaTook,    //A DGS tells to another DGS : I be ready. Do one last broadcast and then stop.
-    ReleaseArea, // The DGS that lost the aera tells the SPATIAL SERVER SO.
+    TakeArea,         //asks a DGS to take a specific area from N someone
+    ReadyToTake,      // this DGS tells another DGS : I'll take that (he answers with 1 serialisation of everything)
+    ForceReleaseAera, // The spatial server sends it to people when the DGS is unassigned from its shard.
+    AeraTook,         // A DGS TELLS THE SPATIAL SERVER it took an aera OR
+    AeraGiven,        // A DGS TELLS THE SPATIAL SERVER it Released this aera.
 }
 impl_bitcode_encode_decode!(ChunkHandOffAction);
 
 #[derive(Decode, Encode, Debug)]
 pub struct ChunkHandOff {
     pub action: ChunkHandOffAction,
-    pub areas: Vec<(Rect,Option<NodeId>)>,
+    pub areas: Vec<(Rect, Option<NodeId>)>,
 }
 impl_bitcode_encode_decode!(ChunkHandOff);
 impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
@@ -107,21 +111,15 @@ impl NetRead for SpawnClientMsg {
 #[derive(Debug, Decode, Encode, Clone)]
 pub struct ChunkDataHandOff {
     pub origin_aera: GameChunkAera,
-    pub old_owner : Option<NodeId>,
+    pub old_owner: Option<NodeId>,
     pub data: Vec<EntityData>, //géré directement par les DGS
 }
 impl_bitcode_encode_decode!(ChunkDataHandOff);
-impl_game_message!(
-    ChunkDataHandOff,
-    GameMessageHeaders::ChunkDataHandOff
-);
+impl_game_message!(ChunkDataHandOff, GameMessageHeaders::ChunkDataHandOff);
 
 #[derive(Debug, Decode, Encode, Clone)]
 pub struct EntityHandOff {
-    pub data: Vec<EntityData>
+    pub data: Vec<EntityData>,
 }
 impl_bitcode_encode_decode!(EntityHandOff);
-impl_game_message!(
-    EntityHandOff,
-    GameMessageHeaders::EntityHandOff
-);
+impl_game_message!(EntityHandOff, GameMessageHeaders::EntityHandOff);

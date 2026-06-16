@@ -157,7 +157,7 @@ impl GameChunkAera {
     }
 
     // donne les chunks de la bordure (1 == les chunks voisins pas dedans, 0 == les chunks les plus sur le bord, -1 == ???)
-    pub fn get_borders_as_aera(&self, margin: i8) -> Vec<GameChunkAera> {
+    pub fn get_borders_as_aera(&self, margin: u8) -> Vec<GameChunkAera> {
         let margin = margin as i16;
         let mut aeras = Vec::with_capacity(4);
 
@@ -174,27 +174,30 @@ impl GameChunkAera {
             y_min: self.y_max + margin,
             y_max: self.y_max + margin,
         });
+
+        let coin_eater = if margin == 0 { 1 } else { 0 };
         aeras.push(GameChunkAera {
             x_min: self.x_min - margin,
             x_max: self.x_min - margin,
-            y_min: self.y_min,
-            y_max: self.y_max,
+            y_min: self.y_min + coin_eater,
+            y_max: self.y_max - coin_eater,
         });
 
         aeras.push(GameChunkAera {
             x_min: self.x_max + margin,
             x_max: self.x_max + margin,
-            y_min: self.y_min,
-            y_max: self.y_max,
+            y_min: self.y_min + coin_eater,
+            y_max: self.y_max - coin_eater,
         });
 
         aeras
     }
     // donne les chunks de la bordure (1 == les chunks voisins pas dedans, 0 == les chunks les plus sur le bord, -1 == ???)
-    pub fn get_borders(&self, margin: i8) -> Vec<GameChunk> {
-        let mut chunks = Vec::with_capacity(
-            ((self.x_max - self.x_min) * 2 + (self.y_max - self.y_min) * 2 + 8) as usize,
-        );
+    pub fn get_borders(&self, margin: u8) -> Vec<GameChunk> {
+        let width = (self.x_max - self.x_min + 1) as usize;
+        let height = (self.y_max - self.y_min + 1) as usize;
+        let capacity_needed = (width * 2) + (height * 2) + 4;
+        let mut chunks = Vec::with_capacity(capacity_needed);
         for aeras in self.get_borders_as_aera(margin) {
             for chunk in aeras.iter() {
                 chunks.push(chunk);
@@ -202,6 +205,13 @@ impl GameChunkAera {
         }
 
         chunks
+    }
+    pub fn get_chunk_count(&self) -> i32 {
+        (self.x_max - self.x_min +1) as i32 * (self.y_max - self.y_min +1) as i32
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.x_max >= self.x_min && self.y_max >= self.y_min
     }
 }
 pub fn get_chunk_size(world_size: f32, max_division: u8) -> f32 {

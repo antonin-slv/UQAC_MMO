@@ -2,13 +2,14 @@
 use crate::dgs_entity_functions::{
     Authority, ControlledBy, EntityTypeComponent, InputComponent, NetworkIdComponent,
 };
-use crate::dgs_network::{BrockerManager, ServerStats};
-use crate::events::{AssignedChunks, FastMap};
+use crate::dgs_network::BrockerManager;
+use crate::events::AssignedChunks;
 use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::GameChunk;
 use core_types::get_chunk;
+use core_types::helpers::FastMap;
 use game_message::msg_client_server::*;
 use game_message::msg_dgs;
 use game_message::msg_entities::{EntityData, NetComponent};
@@ -18,9 +19,14 @@ pub struct SnapshotPlugin;
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct SnapshotSet;
 
+#[derive(Resource, Default)]
+pub struct EntityChunkMap {
+    map: FastMap<GameChunk, PersonalSnapshot>,
+}
+
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.insert_resource(EntityChunkMap::default()).add_systems(
             PostUpdate,
             (
                 update_and_send_authority_pre_snapshot,
@@ -80,8 +86,8 @@ fn update_and_send_authority_pre_snapshot(
             updates,
         };
         println!(
-            "Relieving Author of Ett {} for {:?}",
-            ett_net_id.0, entity_chunk
+            "[GameServer][{:?}] EntityHandoff {} for {:?} owner",
+            broker.client.node_id, ett_net_id.0, entity_chunk
         );
 
         handoffmap
@@ -104,7 +110,7 @@ fn update_and_send_authority_pre_snapshot(
 
 fn broadcast_snapshots(
     net: ResMut<BrockerManager>,
-    _server_data: ResMut<ServerStats>,
+    mut prepared_memory_for_map: ResMut<EntityChunkMap>,
     chunk_assigned: ResMut<AssignedChunks>,
     query_all_entities: Query<(
         &NetworkIdComponent,
@@ -126,7 +132,7 @@ fn broadcast_snapshots(
     }
 
     // Pré-calcul de l'état du monde ---
-    let mut precomputed_targets: FastMap<GameChunk, PersonalSnapshot> = FastMap::default();
+    let precomputed_targets = &mut prepared_memory_for_map.map;
 
     for (net_id, owner, transform, auth, entity_type) in query_all_entities.iter() {
         if *auth == Authority::Ghost {
@@ -164,6 +170,8 @@ fn broadcast_snapshots(
 
         net.client.publish_unreliable(topic, snapshot);
     }
+
+    prepared_memory_for_map.map.clear();
 }
 
 // 3 cas possibles : (en fait on recevra pas les infos je crois)
@@ -205,7 +213,7 @@ fn update_existence(
                 });
             entity_directory.entities.remove(&net_id.0);
             commands.entity(entity).despawn();
-            println!("Delete ref to entity {:?}", entity);
+            println!("Delete ref to entity {:?}", net_id.0);
         }
     }
 }

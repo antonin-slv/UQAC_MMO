@@ -26,6 +26,9 @@ impl EntityType {
     pub fn is_static(&self) -> bool {
         self == EntityType::Turret || self == EntityType::Wall
     }
+    pub fn has_input(&self) -> bool {
+        self == EntityType::Player || self == EntityType::Zombie || self == EntityType::Turret
+    }
 }
 
 // 3. L'énumération des Composants

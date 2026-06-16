@@ -122,7 +122,7 @@ pub fn spawn_or_update_entity(
     entity_directory: &mut EntityDirectory,
     current_in_ecs_entities: &mut Query<
         (Entity, &mut Transform, &mut Authority),
-        With<ControlledBy>,
+        (With<ControlledBy>, With<NetworkIdComponent>),
     >,
     recv_entity: &EntityData,
 ) -> Entity {
@@ -217,6 +217,13 @@ pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComp
                 EntityType::Turret => entity_cmds.insert(Turret),
                 EntityType::Zombie => entity_cmds.insert(Zombie),
             };
+
+            if entity.has_input() {
+                let input_component = InputComponent {
+                    input_buffer: InputBuffer::new(5),
+                };
+                entity_cmds.insert(input_component);
+            }
         }
         NetComponent::Inputs(buffers) => {
             entity_cmds.insert(InputComponent {
