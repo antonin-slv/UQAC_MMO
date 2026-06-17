@@ -5,6 +5,8 @@ use core_types::{Rect, Vec2};
 use game_message::msg_dgs::Heartbeat;
 use game_message::msg_entities::NetworkEntityId;
 use rand::random_range;
+use rand::RngExt;
+use rand::prelude::IteratorRandom;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -265,5 +267,26 @@ impl ShardManager {
         }
 
         entities
+    }
+
+    pub fn get_random_spawn_point(&self) -> Option<Vec2> {
+        let mut rng = rand::rng();
+
+        // 1. Collecter toutes les entités existantes
+        let all_entities: Vec<&Entity> = self
+            .shards
+            .values()
+            .flat_map(|shard| shard.entities.iter())
+            .collect();
+
+        // 2. Choisir une entité aléatoire si la liste n'est pas vide
+        let random_entity = all_entities.iter().cloned().choose(&mut rng)?;
+
+        let position = Vec2::new(
+            rng.random_range(-10.0..10.0) + random_entity.pos.x,
+            rng.random_range(-10.0..10.0) + random_entity.pos.y,
+        );
+
+        Some(position)
     }
 }

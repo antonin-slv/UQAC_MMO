@@ -11,6 +11,7 @@ use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, Personal
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
 use game_message::msg_entities::NetComponent;
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use rand::random_range;
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -283,10 +284,12 @@ impl BrokerClient {
     ) {
         println!("[Orchestrator] On new client connected");
 
-        let new_entity_pos = Vec2::new(
-            rand::random_range(0.0..self.chunk_size),
-            rand::random_range(0.0..self.chunk_size),
-        );
+        let half_size = self.world_size / 2.0;
+
+        let new_entity_pos = shard_manager.get_random_spawn_point().unwrap_or(Vec2::new(
+            random_range(-half_size..half_size),
+            random_range(-half_size..half_size),
+        ));
 
         println!(
             "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",

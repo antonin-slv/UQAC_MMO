@@ -2,18 +2,19 @@
 pub mod bevy_renderer {
     use crate::quadtree::QuadTree;
     use crate::shard_manager::{Shard, ShardManager};
-    use bevy::DefaultPlugins;
     use bevy::app::{App, Startup, Update};
     use bevy::camera::Camera2d;
     use bevy::color::{Color, Srgba};
     use bevy::math::{Isometry2d, Rot2, Vec2};
-    use bevy::prelude::{Commands, Gizmos, Res, ResMut, Resource};
+    use bevy::prelude::{Commands, Gizmos, Query, Res, ResMut, Resource, With};
+    use bevy::window::{PrimaryWindow, Window};
+    use bevy::DefaultPlugins;
     use bevy_text_gizmos::TextGizmos;
-    use core_types::Rect;
     use core_types::chunks::get_chunk_size;
+    use core_types::Rect;
     use std::collections::HashSet;
-    use std::sync::Mutex;
     use std::sync::mpsc::Receiver;
+    use std::sync::Mutex;
 
     #[derive(Resource)]
     pub struct QuadTreeChannelResource {
@@ -55,16 +56,27 @@ pub mod bevy_renderer {
         }
     }
 
-    fn draw_gizmos(mut gizmos: Gizmos, snapshot: Res<LocalQuadTreeSnapshot>) {
+    fn draw_gizmos(
+        mut gizmos: Gizmos,
+        snapshot: Res<LocalQuadTreeSnapshot>,
+        q_window: Query<&Window, With<PrimaryWindow>>,
+    ) {
         if let Some(ref quad_tree) = snapshot.quad_tree
             && let Some(ref shard_manager) = snapshot.shard_manager
+            && let Ok(window) = q_window.single()
         {
             let world_size = quad_tree.bounds.max_x - quad_tree.bounds.min_x;
             let chunk_size = get_chunk_size(world_size, quad_tree.max_depth);
-            draw_quadtree(&mut gizmos, quad_tree, shard_manager, chunk_size);
+            let screen_size = Vec2::new(window.width(), window.height());
+            let scale = screen_size.min_element() / world_size;
+
+            draw_quadtree(&mut gizmos, quad_tree, shard_manager, chunk_size, scale);
 
             for entity in shard_manager.get_entities() {
-                let start = Isometry2d::new(Vec2::new(entity.pos.x, entity.pos.y), Rot2::IDENTITY);
+                let start = Isometry2d::new(
+                    Vec2::new(entity.pos.x, entity.pos.y) * scale,
+                    Rot2::IDENTITY,
+                );
                 gizmos.circle_2d(start, 5.0, Color::Srgba(Srgba::BLUE));
             }
         }
@@ -75,13 +87,38 @@ pub mod bevy_renderer {
         quad_tree: &QuadTree,
         shard_manager: &ShardManager,
         chunk_size: f32,
+        scale: f32,
     ) {
         if let Some(children) = quad_tree.children.as_ref() {
             for child in children.iter() {
-                draw_quadtree(gizmos, child, shard_manager, chunk_size);
+                draw_quadtree(gizmos, child, shard_manager, chunk_size, scale);
             }
         } else {
-            let (start, size) = get_gizmos_area(&quad_tree.bounds);
+            let (start, size) = get_gizmos_area(&quad_tree.bounds, scale);
+
+            // Dessin du rectangle avec les dimensions mises à l'échelle
+            gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
+            gizmos.text_2d(
+                start,
+                format!(
+                    "{}\n{}",
+                    quad_tree.shard_id,
+                    shard_manager
+                        .shards
+                        .get(&quad_tree.shard_id)
+                        .unwrap_or(&Shard {
+                            dgs: Some(0),
+                            entities: HashSet::new()
+                        })
+                        .dgs
+                        .unwrap_or(0)
+                )
+                .as_str(),
+                16.0 - quad_tree.depth as f32,
+                Vec2::ZERO,
+                Color::WHITE,
+            );
+            let (start, size) = get_gizmos_area(&quad_tree.bounds, scale);
             let dgs = shard_manager
                 .shards
                 .get(&quad_tree.shard_id)
@@ -105,7 +142,7 @@ pub mod bevy_renderer {
                 for chunk in heartbeat.chunk_managed.iter() {
                     let area = chunk.to_core_rect(chunk_size);
 
-                    let (start, size) = get_gizmos_area(&area);
+                    let (start, size) = get_gizmos_area(&area, scale);
 
                     gizmos.rect_2d(start, size, color);
                 }
@@ -114,13 +151,17 @@ pub mod bevy_renderer {
         }
     }
 
-    fn get_gizmos_area(area: &Rect) -> (Isometry2d, Vec2) {
-        let size = Vec2::new(area.max_x - area.min_x, area.max_y - area.min_y);
-        let start = Isometry2d::new(
-            Vec2::new(area.min_x + size.x / 2., area.min_y + size.y / 2.),
-            Rot2::IDENTITY,
+    fn get_gizmos_area(area: &Rect, scale: f32) -> (Isometry2d, Vec2) {
+        let size = Vec2::new(
+            (area.max_x - area.min_x) * scale,
+            (area.max_y - area.min_y) * scale,
         );
 
-        (start, size)
+        let center = Vec2::new(
+            (area.min_x + (area.max_x - area.min_x) / 2.) * scale,
+            (area.min_y + (area.max_y - area.min_y) / 2.) * scale,
+        );
+
+        (Isometry2d::from_translation(center), size)
     }
 }
