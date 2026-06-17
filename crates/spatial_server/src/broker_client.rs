@@ -168,6 +168,20 @@ impl BrokerClient {
                     stream: _,
                     mut payload,
                 } => match payload.header {
+                    GameMessageHeaders::ChunkHandOff => match payload.extract::<ChunkHandOff>() {
+                        Ok(handoff) => {
+                            let Some(quad_tree) = quad_tree else { continue };
+                            if handoff.action == ChunkHandOffAction::AeraTook {
+                                // Un DGS nous informe qu'il vient de prendre cette zone
+                                for (rect, new_id) in handoff.areas {
+                                    if let Some(new_id) = new_id {
+                                        shard_manager.on_area_took(new_id, rect, &quad_tree);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => println!("Erreur Handoff : {}", e),
+                    },
                     GameMessageHeaders::ClientHello => match payload.extract::<ClientHelloMsg>() {
                         Ok(msg) => {
                             if let Some(quad_tree) = quad_tree {

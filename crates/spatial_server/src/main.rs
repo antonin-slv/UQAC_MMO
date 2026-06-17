@@ -51,24 +51,14 @@ async fn main() -> Result<()> {
                     QuadTreeCommand::TryMerge => {
                         if let Some(quad_tree) = &mut quad_tree {
                             let merged_shards = quad_tree.try_merge(&mut shard_manager);
-                            for (shard_id, merged_shards) in merged_shards {
-                                let bounds = quad_tree.get_shard_bounds(&shard_id);
-                                if let Some((bounds, _)) = bounds {
-                                    shard_manager.on_shard_destroyed(
-                                        shard_id,
-                                        bounds,
-                                        merged_shards,
-                                        &broker_client,
-                                    );
-                                    shard_manager.on_new_shard(
-                                        None,
-                                        shard_id,
-                                        bounds,
-                                        &broker_client,
-                                    );
-                                }
+                            for (parent_id, children_data) in merged_shards {
+                                // On passe directement les données à notre nouvelle méthode
+                                shard_manager.on_merge_request(
+                                    parent_id,
+                                    children_data,
+                                    &broker_client,
+                                );
                             }
-
                             #[cfg(feature = "debug_visual")]
                             let _ = bevy_tx.send((quad_tree.clone(), shard_manager.clone()));
                         }

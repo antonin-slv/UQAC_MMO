@@ -2,11 +2,64 @@ use crate::broker_client::BrokerClient;
 use crate::shard_manager::ShardManager;
 use core_types::{Rect, Vec2};
 use game_message::msg_entities::NetworkEntityId;
-use std::collections::HashMap; // Ajout de l'import
+use std::collections::HashMap;
+// Ajout de l'import
 use std::env;
 use std::hash::{Hash, Hasher};
 
 pub type ShardId = u32;
+
+pub trait ShardIdExt {
+    /// Retourne l'ID du parent direct (None si c'est la racine 0)
+    fn parent(self) -> Option<ShardId>;
+
+    /// Retourne l'index de cet ID par rapport à son parent (0, 1, 2 ou 3)
+    fn child_index(self) -> Option<usize>;
+
+    /// Retourne l'ID de l'enfant à l'index donné
+    fn child(self, index: u32) -> ShardId;
+
+    /// Si le `target` est un descendant de `self`, retourne l'index (0..4)
+    /// de l'enfant direct de `self` dans lequel il faut descendre.
+    fn child_index_towards(self, target: ShardId) -> Option<usize>;
+}
+
+impl ShardIdExt for ShardId {
+    fn parent(self) -> Option<ShardId> {
+        if self == 0 {
+            None
+        } else {
+            Some((self - 1) / 4)
+        }
+    }
+
+    fn child_index(self) -> Option<usize> {
+        if self == 0 {
+            None
+        } else {
+            Some(((self - 1) % 4) as usize)
+        }
+    }
+
+    fn child(self, index: u32) -> ShardId {
+        debug_assert!(index < 4, "Un quadtree n'a que 4 enfants (0-3)");
+        self * 4 + 1 + index
+    }
+
+    fn child_index_towards(self, target: ShardId) -> Option<usize> {
+        let mut current = target;
+
+        while current > self {
+            let parent_id = (current - 1) / 4;
+            if parent_id == self {
+                return Some(((current - 1) % 4) as usize);
+            }
+            current = parent_id;
+        }
+
+        None
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Entity {
@@ -112,7 +165,7 @@ impl QuadTree {
         shard_manager: &mut ShardManager,
         broker: &BrokerClient,
     ) {
-        println!("Managed subdivisions : {:?}", subdivided_shards);
+        //println!("Managed subdivisions : {:?}", subdivided_shards);
         for (new_shard, parent) in subdivided_shards {
             let sub_shard = self.get_shard_bounds(&new_shard);
             if let Some((sub_shard_bounds, is_leaf)) = sub_shard {
@@ -223,7 +276,7 @@ impl QuadTree {
     pub fn try_merge(
         &mut self,
         shard_manager: &mut ShardManager,
-    ) -> HashMap<ShardId, Vec<ShardId>> {
+    ) -> HashMap<ShardId, Vec<(ShardId, Rect)>> {
         let mut merges = HashMap::new();
         let entity_count = self.count_entities(shard_manager);
 
@@ -258,15 +311,13 @@ impl QuadTree {
     }
 
     // NOUVELLE VERSION DE MERGE
-    fn merge(&mut self, shard_manager: &mut ShardManager) -> Vec<ShardId> {
+    fn merge(&mut self, shard_manager: &mut ShardManager) -> Vec<(ShardId, Rect)> {
         let mut destroyed_shards: Vec<(ShardId, Rect)> = Vec::new();
 
         // On délègue la récolte à une fonction récursive pour bien vider la totalité de l'arbre
         self.collect_and_destroy_descendants(shard_manager, self.shard_id, &mut destroyed_shards);
 
-        let merged_ids = destroyed_shards.iter().map(|(id, _)| *id).collect();
-
-        merged_ids
+        destroyed_shards
     }
 
     // NOUVEAU : Fonction récursive pour détruire et drainer tous les niveaux enfants
@@ -298,25 +349,26 @@ impl QuadTree {
     fn generate_sub_shards(&mut self) -> Vec<(ShardId, Rect)> {
         let sub_bounds = self.bounds.split();
         let mut shard_ids = Vec::new();
-        let offset = self.depth * 2;
         for i in 0..4 {
-            let mut child_id = i;
-            child_id = child_id << offset;
-            child_id |= self.shard_id;
+            let child_id = self.shard_id.child(i);
             shard_ids.push((child_id, sub_bounds[i as usize]));
         }
         shard_ids
     }
 
     pub fn get_shard_bounds(&self, shard_id: &ShardId) -> Option<(Rect, bool)> {
-        if let Some(children) = &self.children {
-            let child_id = ((shard_id >> self.depth * 2) & 3) as usize;
-            return children[child_id].get_shard_bounds(shard_id);
-        }
-
         if *shard_id == self.shard_id {
             return Some((self.bounds.clone(), self.children.is_none()));
         }
+        // 2. Ce n'est pas le nœud actuel, on cherche dans les enfants (s'ils existent)
+        if let Some(children) = &self.children {
+            // Au lieu de boucler, on calcule mathématiquement quel enfant contient la cible
+            if let Some(child_idx) = self.shard_id.child_index_towards(*shard_id) {
+                // On descend uniquement dans l'enfant pertinent
+                return children[child_idx].get_shard_bounds(shard_id);
+            }
+        }
+
         None
     }
 
@@ -327,7 +379,7 @@ impl QuadTree {
                     return child.get_shard_of_point(point);
                 }
             }
-            return None
+            return None;
         }
 
         Some(self.shard_id)
