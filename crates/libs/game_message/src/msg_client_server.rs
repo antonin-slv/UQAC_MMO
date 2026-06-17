@@ -31,12 +31,21 @@ pub struct PlayerInput {
 }
 
 /// Le Component Bevy attaché au Joueur (Local) ou à sa représentation serveur.
-#[derive(Clone, Encode, Decode, Debug, Default, PartialEq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq)]
 pub struct InputBuffer {
     /// L'historique récent des inputs (ex: les 60 dernières frames)
     pub history: VecDeque<(Tick, PlayerInput)>,
     /// La taille maximale du buffer pour éviter les fuites de mémoire
     pub max_size: u8,
+}
+
+impl Default for InputBuffer {
+    fn default() -> Self {
+        InputBuffer {
+            history: VecDeque::with_capacity(1),
+            max_size: 1,
+        }
+    }
 }
 
 impl InputBuffer {

@@ -7,7 +7,6 @@ edition = "2024"
 # Héritées du workspace
 dotenv = { workspace = true }
 uuid = { workspace = true }
-rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
 
 # Surcharge spécifique au serveur
 bevy = { version = "0.18.1", default-features = false }
@@ -17,7 +16,6 @@ broker_client = { workspace = true }
 game_message = { workspace = true }
 broker_protocol = { workspace = true }
 core_types = { workspace = true }
-bitcode = { workspace = true }
 
 
 

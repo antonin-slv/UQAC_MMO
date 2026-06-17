@@ -31,7 +31,7 @@ impl Plugin for GameLogicPlugin {
         app.insert_resource(ClientDirectory::default())
             .insert_resource(EntityDirectory::default())
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     (
                         handle_new_players,
@@ -117,9 +117,11 @@ fn handle_disconnected(
 fn update_inputs(
     mut ev_input: MessageReader<events::PlayerInputEvent>,
     mut query: Query<&mut InputComponent>,
-    client_directory: ResMut<ClientDirectory>,
+    mut client_directory: ResMut<ClientDirectory>,
     entity_directory: ResMut<EntityDirectory>,
+    mut broker: ResMut<BrockerManager>,
 ) {
+    let header = format!("[GameServer][{:?}][UpdateInput] ", broker.client.node_id);
     for ev in ev_input.read() {
         if let Some(possible_player_entities) = client_directory.sessions.get(&ev.client_id) {
             if let Some(_) = possible_player_entities
@@ -134,16 +136,24 @@ fn update_inputs(
                             .recv_other(ev.input_data.clone());
                         continue;
                     } else {
-                        println!("\t\tnot found in ecs");
+                        if broker.not_found_count <= 4 {
+                            println!("{}{} not found in ecs", header, ev.entity_id);
+                        }
+                        broker.not_found_count +=1;
+
                     }
                 } else {
-                    println!("\t\tnot found netID->Entity map");
+                    println!("{}not found netID->Entity map", header);
                 }
             } else {
-                println!("\t\t not found in player's entities");
+                println!("{}not found in player's entities", header);
             }
         } else {
-            println!("\t\tThis player has no entity.");
+            if broker.not_found_count <= 4{
+                println!("{}player {} has no entity", header, ev.client_id);
+            }
+            broker.not_found_count +=1;
+
         }
     }
 }
@@ -161,8 +171,8 @@ fn apply_inputs(
         if let Some(last_input) = last_input {
             let xdiff = f32::from(last_input.1.right) - f32::from(last_input.1.left);
             let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
-            pos.translation.x += xdiff * 80.0 * delta_t;
-            pos.translation.y += ydiff * 80.0 * delta_t;
+            pos.translation.x += xdiff * 40.0 * delta_t;
+            pos.translation.y += ydiff * 40.0 * delta_t;
         }
     }
 }

@@ -100,10 +100,15 @@ fn capture_inputs(
 }
 
 fn draw_chunks(mut gizmos: Gizmos, chunking: Res<Chunking>) {
-    let start = Isometry2d::new(
-        Vec2::new(chunking.chunk_size, chunking.chunk_size) * 0.5,
-        Rot2::IDENTITY,
+    if chunking.chunk_size <= 0.0 {
+        return;
+    }
+
+    // Dessine une grille de 20x20 chunks, centrée sur l'origine du monde (0,0)
+    gizmos.grid_2d(
+        Isometry2d::IDENTITY,
+        UVec2::new(20, 20),               // Résolution : 20 colonnes, 20 lignes
+        Vec2::splat(chunking.chunk_size), // Taille physique de chaque cellule
+        Color::Srgba(Srgba::RED),
     );
-    let size = Vec2::ONE * chunking.chunk_size;
-    gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
 }
