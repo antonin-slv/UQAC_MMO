@@ -185,8 +185,8 @@ impl Plugin for NetworkPlugin {
             .add_message::<ChunkHandOffMessage>()
             .add_message::<EntityTransferEvent>();
 
-        app.add_systems(PreUpdate, network_bridge_system.in_set(NetworkSet));
-        app.add_systems(Update, send_heartbeat_system.in_set(NetworkSet));
+        app.add_systems(FixedPreUpdate, network_bridge_system.in_set(NetworkSet));
+        app.add_systems(FixedUpdate, send_heartbeat_system.in_set(NetworkSet));
 
         println!("\n[Server] Network plugin initialized.\n");
     }

@@ -31,7 +31,7 @@ impl Plugin for GameLogicPlugin {
         app.insert_resource(ClientDirectory::default())
             .insert_resource(EntityDirectory::default())
             .add_systems(
-                Update,
+                FixedUpdate,
                 (
                     (
                         handle_new_players,
@@ -137,7 +137,7 @@ fn update_inputs(
                         continue;
                     } else {
                         if broker.not_found_count <= 4 {
-                            println!("{} {} not found in ecs", header, ev.entity_id);
+                            println!("{}{} not found in ecs", header, ev.entity_id);
                         }
                         broker.not_found_count +=1;
 
@@ -171,8 +171,8 @@ fn apply_inputs(
         if let Some(last_input) = last_input {
             let xdiff = f32::from(last_input.1.right) - f32::from(last_input.1.left);
             let ydiff = f32::from(last_input.1.up) - f32::from(last_input.1.down);
-            pos.translation.x += xdiff * 80.0 * delta_t;
-            pos.translation.y += ydiff * 80.0 * delta_t;
+            pos.translation.x += xdiff * 40.0 * delta_t;
+            pos.translation.y += ydiff * 40.0 * delta_t;
         }
     }
 }

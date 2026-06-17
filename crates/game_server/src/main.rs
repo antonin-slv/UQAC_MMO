@@ -48,15 +48,15 @@ fn main() {
         .add_plugins(snapshot::SnapshotPlugin)
         .add_plugins(dgs_chunk_plugin::ChunkPlugin)
         .configure_sets(
-            PreUpdate,
+            FixedPreUpdate,
             (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet).chain(),
         )
         .configure_sets(
-            Update,
+            FixedUpdate,
             (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet).chain(),
         )
         .configure_sets(
-            PostUpdate,
+            FixedPostUpdate,
             (NetworkSet, ChunksAuthorityLogicSet, game::GameLogicSet, SnapshotSet).chain(),
         )
         .run();

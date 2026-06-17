@@ -27,7 +27,7 @@ pub struct EntityChunkMap {
 impl Plugin for SnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(EntityChunkMap::default()).add_systems(
-            PostUpdate,
+            FixedPostUpdate,
             (
                 update_and_send_authority_pre_snapshot,
                 broadcast_snapshots,

@@ -1,6 +1,4 @@
-﻿use crate::dgs_entity_functions::{
-    spawn_or_update_entity, Authority, ControlledBy, NetworkIdComponent,
-};
+﻿use crate::dgs_entity_functions::{spawn_or_update_entity, Authority, ControlledBy, EntityTypeComponent, InputComponent, NetworkIdComponent};
 use crate::dgs_network::BrockerManager;
 use crate::events;
 use crate::events::{
@@ -47,7 +45,7 @@ impl Plugin for ChunkPlugin {
         .add_message::<events::ChunkHandOffMessage>()
         .add_message::<ChunkTransferEvent>()
         .add_systems(
-            PreUpdate,
+            FixedPreUpdate,
             (
                 handle_snapshot_received,
                 handle_chunks_handoff_message,
@@ -58,7 +56,7 @@ impl Plugin for ChunkPlugin {
                 .in_set(ChunksAuthorityLogicSet),
         )
         .add_systems(
-            PostUpdate,
+            FixedPostUpdate,
             execute_outgoing_chunk_handoff_transfers.in_set(ChunksAuthorityLogicSet),
         );
     }
@@ -272,7 +270,6 @@ fn handle_chunks_handoff_message(
 
 // PHASE 3: On reçoit les entités transférées (Nous sommes le Target)
 //        , à ce niveau, tout les chunks concernés sont déjà en ghost.
-//2 CAS : entity HandOFF ou chunk handoff (on transmet des entités d'un chunk ou UN CHUNK ET SON AUTHORITE)
 fn handle_chunk_transfer(
     mut ev_transfer: MessageReader<ChunkTransferEvent>,
     mut commands: Commands,
@@ -292,7 +289,7 @@ fn handle_chunk_transfer(
     let mut taken_aeras = Vec::new();
     for ev in ev_transfer.read() {
         println!(
-            "[Handoff][{:?}] Received : {:?}. FROM : {:?}. With {} entities",
+            "[GameServer][{:?}][Handoff] Received : {:?}. FROM : {:?}. With {} entities",
             broker.client.node_id,
             ev.message.origin_aera,
             ev.message.old_owner,
@@ -400,6 +397,8 @@ fn execute_outgoing_chunk_handoff_transfers(
         &Transform,
         &ControlledBy,
         &mut Authority,
+        &EntityTypeComponent,
+        Option<&InputComponent>
     )>,
     mut chunk_directory: ResMut<AssignedChunks>,
 ) {
@@ -415,12 +414,10 @@ fn execute_outgoing_chunk_handoff_transfers(
     let mut lost_aeras_inner = Vec::new();
     let mut lost_aeras_outer = FastSet::default();
 
+    let mut chunk_count = 0;
+
     for (real_aera, target_dgs) in pending_transfers.aeras.drain(..1) {
         let chunk_aera = real_aera.bounding_chunk_aera(chunk_directory.chunk_size);
-        println!(
-            "[GameServer][{:?}] ChunkHandoff, giving {:?} to DGS {:?}",
-            broker.client.node_id, chunk_aera, target_dgs
-        );
 
         let Some(target_dgs) = target_dgs else {
             continue;
@@ -434,21 +431,36 @@ fn execute_outgoing_chunk_handoff_transfers(
 
         let mut transfer_data = Vec::new();
         // 1. On rassemble et on rétrograde en une seule passe
-        for (_, net_id, transform, owner, mut authority) in entity_query.iter_mut() {
+        for (_, net_id, transform, owner, mut authority, entity_type, input_opt) in entity_query.iter_mut() {
             let x_y = core_types::Vec2::new(transform.translation.x, transform.translation.y);
             if rect.contains(x_y) && *authority == Authority::Authoritative {
                 let pos = NetComponent::Position(x_y);
+                let type_comp = NetComponent::Type(entity_type.0);
+
+                let mut updates = vec![pos, type_comp];
+
+                // Append input buffer if the entity has one
+                if let Some(inputs) = input_opt {
+                    updates.push(NetComponent::Inputs(inputs.input_buffer.clone()));
+                }
+
                 let entity_data = EntityData {
                     net_id: net_id.0,
                     owner_id: owner.client_id,
-                    updates: vec![pos],
+                    updates,
                 };
                 *authority = Authority::LastAuthFrame;
                 transfer_data.push(entity_data);
-                // On est dans le début du PostUpdate. On a prévenu le destinataire.
-                // On va broadcast une dernière fois, puis libérer l'autorité avec le mécanisme naturel (pas chez moi == pas autorité)
             }
         }
+
+        println!(
+            "[GameServer][{:?}] ChunkHandoff, giving {:?} to DGS {:?} with {} entities",
+            broker.client.node_id,
+            chunk_aera,
+            target_dgs,
+            transfer_data.len()
+        );
 
         // 2. On envoie le paquet final
         let handoff_msg = ChunkDataHandOff {
@@ -480,7 +492,7 @@ fn execute_outgoing_chunk_handoff_transfers(
             chunk_directory.assigned_chunks.remove(&chunk);
         }
 
-        let chunk_count = chunk_directory.assigned_chunks.iter().count();
+        chunk_count = chunk_directory.assigned_chunks.iter().count();
 
         println!(
             "[GameServer][{:?}] {} chunks given and {} remaining",
@@ -488,12 +500,6 @@ fn execute_outgoing_chunk_handoff_transfers(
             chunk_aera.get_chunk_count(),
             chunk_count
         );
-        if chunk_count == 0 {
-            panic!(
-                "[GameServer][{:?}] MIMIR car pas chunks:/ !",
-                broker.client.node_id
-            );
-        }
 
         if chunk_aera.x_min >= chunk_aera.x_max || chunk_aera.y_min >= chunk_aera.y_max {
             //si c'est le cas la inner-zone serait vide...
@@ -530,6 +536,14 @@ fn execute_outgoing_chunk_handoff_transfers(
     chunk_directory
         .ghost_chunks
         .retain(|current_chunk| !killed_ghost_chunks.contains(current_chunk));
+
+    if chunk_count == 0 {
+        println!(
+            "[GameServer][{:?}] No chunks remaining (holding {} ghost chunks). Idling...",
+            broker.client.node_id,
+            chunk_directory.ghost_chunks.iter().count()
+        );
+    }
 
     // 3. Se désabonner des topics Input de chaque chunk perdu.
     let vec_of_killed_ghost_chunks: Vec<GameChunk> = killed_ghost_chunks.into_iter().collect();

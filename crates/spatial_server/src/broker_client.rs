@@ -355,7 +355,7 @@ impl BrokerClient {
             .build();
 
         let chunk_hand_off = ChunkHandOff {
-            action: ChunkHandOffAction::ReleaseArea,
+            action: ChunkHandOffAction::ForceReleaseAera,
             areas,
         };
 
