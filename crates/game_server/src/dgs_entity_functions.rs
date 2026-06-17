@@ -25,7 +25,6 @@ impl Into<NetComponent> for ControlledBy {
     }
 }
 
-
 #[derive(Component)]
 pub struct EntityTypeComponent(pub EntityType);
 
@@ -238,13 +237,6 @@ pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComp
                 EntityType::Turret => entity_cmds.insert(Turret),
                 EntityType::Zombie => entity_cmds.insert(Zombie),
             };
-
-            if entity.has_input() {
-                let input_component = InputComponent {
-                    input_buffer: InputBuffer::new(5),
-                };
-                entity_cmds.insert(input_component);
-            }
         }
         NetComponent::Inputs(buffers) => {
             entity_cmds.insert(InputComponent {

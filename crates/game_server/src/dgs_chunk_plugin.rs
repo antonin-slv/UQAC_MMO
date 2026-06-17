@@ -1,4 +1,7 @@
-﻿use crate::dgs_entity_functions::{spawn_or_update_entity, Authority, ControlledBy, EntityTypeComponent, InputComponent, NetworkIdComponent};
+﻿use crate::dgs_entity_functions::{
+    spawn_or_update_entity, Authority, ControlledBy, EntityTypeComponent, InputComponent,
+    NetworkIdComponent,
+};
 use crate::dgs_network::BrockerManager;
 use crate::events;
 use crate::events::{
@@ -398,7 +401,7 @@ fn execute_outgoing_chunk_handoff_transfers(
         &ControlledBy,
         &mut Authority,
         &EntityTypeComponent,
-        Option<&InputComponent>
+        Option<&InputComponent>,
     )>,
     mut chunk_directory: ResMut<AssignedChunks>,
 ) {
@@ -431,7 +434,9 @@ fn execute_outgoing_chunk_handoff_transfers(
 
         let mut transfer_data = Vec::new();
         // 1. On rassemble et on rétrograde en une seule passe
-        for (_, net_id, transform, owner, mut authority, entity_type, input_opt) in entity_query.iter_mut() {
+        for (_, net_id, transform, owner, mut authority, entity_type, input_opt) in
+            entity_query.iter_mut()
+        {
             let x_y = core_types::Vec2::new(transform.translation.x, transform.translation.y);
             if rect.contains(x_y) && *authority == Authority::Authoritative {
                 let pos = NetComponent::Position(x_y);
@@ -501,7 +506,7 @@ fn execute_outgoing_chunk_handoff_transfers(
             chunk_count
         );
 
-        if chunk_aera.x_min >= chunk_aera.x_max || chunk_aera.y_min >= chunk_aera.y_max {
+        if chunk_aera.x_min + 1 >= chunk_aera.x_max || chunk_aera.y_min + 1 >= chunk_aera.y_max {
             //si c'est le cas la inner-zone serait vide...
             for chunk in chunk_aera.iter() {
                 lost_aeras_outer.insert(chunk);
