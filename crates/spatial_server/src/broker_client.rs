@@ -203,8 +203,7 @@ impl BrokerClient {
                         GameMessageHeaders::Heartbeat => {
                             match payload.extract::<HeartbeatMessage>() {
                                 Ok(heartbeat) => shard_manager.on_heartbeat_receive(
-                                    heartbeat.heartbeat.node_id,
-                                    heartbeat.heartbeat.id,
+                                    heartbeat.heartbeat,
                                     quad_tree,
                                     self,
                                 ),
@@ -349,7 +348,7 @@ impl BrokerClient {
         }
     }
 
-    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
         println!("Assign areas {:?} to DGS {}", areas, dgs_id);
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
@@ -362,7 +361,7 @@ impl BrokerClient {
         self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 
-    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();

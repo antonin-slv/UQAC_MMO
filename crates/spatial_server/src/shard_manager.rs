@@ -2,7 +2,9 @@ use crate::broker_client::BrokerClient;
 use crate::quadtree::{Entity, QuadTree, ShardId};
 use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
+use game_message::msg_dgs::Heartbeat;
 use game_message::msg_entities::NetworkEntityId;
+use rand::random_range;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -16,7 +18,7 @@ pub struct ShardManager {
     pub entities: HashMap<NetworkEntityId, ShardId>,
     pub shards: HashMap<ShardId, Shard>,
     pub active_dgs: HashMap<NodeId, Option<ShardId>>,
-    pub dgs_containers: HashMap<NodeId, String>,
+    pub dgs_data: HashMap<NodeId, (Heartbeat, (f32, f32, f32))>,
 }
 
 impl ShardManager {
@@ -25,26 +27,33 @@ impl ShardManager {
             entities: HashMap::new(),
             shards: HashMap::new(),
             active_dgs: HashMap::new(),
-            dgs_containers: HashMap::new(),
+            dgs_data: HashMap::new(),
         }
     }
 
     pub fn on_heartbeat_receive(
         &mut self,
-        new_dgs_id: NodeId,
-        container_id: String,
+        heartbeat: Heartbeat,
         quad_tree: &QuadTree,
         broker: &BrokerClient,
     ) {
-        if let Some(shard) = self.active_dgs.get_mut(&new_dgs_id) {
-            self.dgs_containers.insert(new_dgs_id, container_id.clone());
-            if shard.is_some() {
-                return;
-            }
+        let data = self.dgs_data.entry(heartbeat.node_id).or_insert((
+            heartbeat.clone(),
+            (
+                random_range(0.0..1.0),
+                random_range(0.0..1.0),
+                random_range(0.0..1.0),
+            ),
+        ));
+        data.0 = heartbeat.clone();
+
+        if let Some(shard) = self.active_dgs.get_mut(&heartbeat.node_id)
+            && shard.is_some()
+        {
+            return;
         }
 
-        self.dgs_containers.insert(new_dgs_id, container_id);
-        self.on_new_dgs(new_dgs_id, quad_tree, broker);
+        self.on_new_dgs(heartbeat.node_id, quad_tree, broker);
     }
 
     pub fn on_new_shard(
@@ -74,7 +83,6 @@ impl ShardManager {
                 },
             );
         }
-
 
         if let Some((new_dgs, dgs_shard)) = self
             .active_dgs

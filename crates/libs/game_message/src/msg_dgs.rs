@@ -3,6 +3,7 @@ use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
+use core_types::helpers::FastSet;
 use core_types::Rect;
 use crate::msg_entities::EntityData;
 
@@ -27,7 +28,7 @@ impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
 pub struct Heartbeat {
     pub id: String,
     pub node_id: NodeId,
-    pub chunk_managed: usize
+    pub chunk_managed: FastSet<GameChunk>
 }
 
 #[derive(Debug, Decode, Encode, Clone)]

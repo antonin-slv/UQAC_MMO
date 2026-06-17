@@ -252,7 +252,7 @@ async fn on_heartbeat_received(redis: &RedisManager, heartbeat: Heartbeat) -> Re
     match server {
         Ok(server) => {
             if let Some(mut server) = server {
-                server.chunk_managed = heartbeat.chunk_managed;
+                server.chunk_managed = heartbeat.chunk_managed.len();
                 redis.update_server(&server).await?;
             } else {
                 eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là");

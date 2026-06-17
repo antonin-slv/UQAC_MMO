@@ -202,7 +202,7 @@ fn send_heartbeat_system(
         let heartbeat = Heartbeat {
             id: server_info.uuid.to_string(),
             node_id: broker.client.node_id.unwrap_or(0),
-            chunk_managed: managed_chunks.assigned_chunks.len(),
+            chunk_managed: managed_chunks.assigned_chunks.clone(),
         };
 
         let heartbeat = HeartbeatMessage { heartbeat };

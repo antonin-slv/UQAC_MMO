@@ -9,6 +9,8 @@ pub mod bevy_renderer {
     use bevy::math::{Isometry2d, Rot2, Vec2};
     use bevy::prelude::{Commands, Gizmos, Res, ResMut, Resource};
     use bevy_text_gizmos::TextGizmos;
+    use core_types::Rect;
+    use core_types::chunks::get_chunk_size;
     use std::collections::HashSet;
     use std::sync::Mutex;
     use std::sync::mpsc::Receiver;
@@ -57,7 +59,9 @@ pub mod bevy_renderer {
         if let Some(ref quad_tree) = snapshot.quad_tree
             && let Some(ref shard_manager) = snapshot.shard_manager
         {
-            draw_quadtree(&mut gizmos, quad_tree, shard_manager);
+            let world_size = quad_tree.bounds.max_x - quad_tree.bounds.min_x;
+            let chunk_size = get_chunk_size(world_size, quad_tree.max_depth);
+            draw_quadtree(&mut gizmos, quad_tree, shard_manager, chunk_size);
 
             for entity in shard_manager.get_entities() {
                 let start = Isometry2d::new(Vec2::new(entity.pos.x, entity.pos.y), Rot2::IDENTITY);
@@ -66,24 +70,18 @@ pub mod bevy_renderer {
         }
     }
 
-    fn draw_quadtree(gizmos: &mut Gizmos, quad_tree: &QuadTree, shard_manager: &ShardManager) {
+    fn draw_quadtree(
+        gizmos: &mut Gizmos,
+        quad_tree: &QuadTree,
+        shard_manager: &ShardManager,
+        chunk_size: f32,
+    ) {
         if let Some(children) = quad_tree.children.as_ref() {
             for child in children.iter() {
-                draw_quadtree(gizmos, child, shard_manager);
+                draw_quadtree(gizmos, child, shard_manager, chunk_size);
             }
         } else {
-            let size = Vec2::new(
-                quad_tree.bounds.max_x - quad_tree.bounds.min_x,
-                quad_tree.bounds.max_y - quad_tree.bounds.min_y,
-            );
-            let start = Isometry2d::new(
-                Vec2::new(
-                    quad_tree.bounds.min_x + size.x / 2.,
-                    quad_tree.bounds.min_y + size.y / 2.,
-                ),
-                Rot2::IDENTITY,
-            );
-            gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
+            let (start, size) = get_gizmos_area(&quad_tree.bounds);
             let dgs = shard_manager
                 .shards
                 .get(&quad_tree.shard_id)
@@ -93,22 +91,36 @@ pub mod bevy_renderer {
                 })
                 .dgs
                 .unwrap_or(0);
-            gizmos.text_2d(
-                start,
-                format!(
-                    "{}\n{}\n{}",
-                    quad_tree.shard_id,
-                    dgs,
-                    shard_manager
-                        .dgs_containers
-                        .get(&dgs)
-                        .unwrap_or(&"No container".to_string())
-                )
-                .as_str(),
-                13.0 - quad_tree.depth as f32,
-                Vec2::ZERO,
-                Color::WHITE,
-            );
+            let heartbeat = shard_manager.dgs_data.get(&dgs);
+            if let Some((heartbeat, color)) = heartbeat {
+                let color = Srgba::new(color.0, color.1, color.2, 1.0);
+                gizmos.text_2d(
+                    start,
+                    format!("{}\n{}\n{}", quad_tree.shard_id, dgs, heartbeat.id).as_str(),
+                    13.0 - quad_tree.depth as f32,
+                    Vec2::ZERO,
+                    color,
+                );
+
+                for chunk in heartbeat.chunk_managed.iter() {
+                    let area = chunk.to_core_rect(chunk_size);
+
+                    let (start, size) = get_gizmos_area(&area);
+
+                    gizmos.rect_2d(start, size, color);
+                }
+                gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
+            }
         }
+    }
+
+    fn get_gizmos_area(area: &Rect) -> (Isometry2d, Vec2) {
+        let size = Vec2::new(area.max_x - area.min_x, area.max_y - area.min_y);
+        let start = Isometry2d::new(
+            Vec2::new(area.min_x + size.x / 2., area.min_y + size.y / 2.),
+            Rot2::IDENTITY,
+        );
+
+        (start, size)
     }
 }
