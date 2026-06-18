@@ -35,7 +35,7 @@ pub fn get_chunk(x: f32, y: f32, chunk_size: f32) -> GameChunk {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Encode, Decode)]
 pub struct Rect {
     pub min_x: f32,
     pub min_y: f32,

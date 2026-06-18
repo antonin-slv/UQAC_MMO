@@ -4,7 +4,6 @@ use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
 use game_message::msg_dgs::Heartbeat;
 use game_message::msg_entities::NetworkEntityId;
-use rand::RngExt;
 use rand::prelude::IteratorRandom;
 use rand::random_range;
 use std::collections::{HashMap, HashSet};
@@ -293,31 +292,6 @@ impl ShardManager {
         has_children
     }
 
-    pub fn on_shard_destroyed(
-        &mut self,
-        parent: ShardId,
-        parent_bounds: Rect,
-        shards: Vec<ShardId>,
-        broker: &BrokerClient,
-    ) {
-        for shard_id in shards {
-            if let Some(shard) = self.shards.get(&shard_id) {
-                if let Some(dgs) = shard.dgs {
-                    let mut old_dgs_id = None;
-                    if let Some(shard) = self.shards.get(&parent) {
-                        old_dgs_id = shard.dgs;
-                    }
-
-                    self.active_dgs.insert(dgs.clone(), None);
-
-                    broker.remove_shard_to_dgs(dgs.clone(), vec![(parent_bounds, old_dgs_id)]);
-                }
-            }
-
-            self.shards.remove(&shard_id);
-        }
-    }
-
     pub fn on_new_dgs(&mut self, dgs_id: NodeId, quad_tree: &QuadTree, broker: &BrokerClient) {
         let mut waiting_shard_info = None;
 
@@ -492,11 +466,6 @@ impl ShardManager {
 
         let random_entity = all_entities.iter().cloned().choose(&mut rng)?;
 
-        let position = Vec2::new(
-            rng.random_range(-10.0..10.0) + random_entity.pos.x,
-            rng.random_range(-10.0..10.0) + random_entity.pos.y,
-        );
-
-        Some(position)
+        Some(random_entity.pos)
     }
 }
