@@ -18,7 +18,11 @@ pub enum BackendCommand {
 }
 
 pub trait GameSocketBackend: Send + 'static {
-    fn run(self, cmd_rx: mpsc::UnboundedReceiver<BackendCommand>, event_tx: mpsc::UnboundedSender<GameNetworkEvent>);
+    fn run(
+        self,
+        cmd_rx: mpsc::UnboundedReceiver<BackendCommand>,
+        event_tx: mpsc::UnboundedSender<GameNetworkEvent>,
+    );
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
@@ -123,7 +127,44 @@ pub struct GamePeer {
     next_stream_id: u16,
 }
 
+#[derive(Clone)]
+pub struct GamePeerSender {
+    cmd_tx: mpsc::UnboundedSender<BackendCommand>,
+}
+
+impl GamePeerSender {
+    pub fn send(
+        &self,
+        conn: &GameConnection,
+        stream: &GameStream,
+        msg: Bytes,
+    ) -> Result<(), GameSocketError> {
+        self.cmd_tx
+            .send(BackendCommand::Send {
+                connection: conn.connection_uuid,
+                stream: stream.clone(),
+                data: msg,
+            })
+            .map_err(|_| GameSocketError::ConnectionError)
+    }
+    fn send_cmd(&self, cmd: BackendCommand) -> Result<(), GameSocketError> {
+        self.cmd_tx
+            .send(cmd)
+            .map_err(|_| GameSocketError::ConnectionError)
+    }
+    pub fn disconnect(&self, conn: &GameConnection) -> Result<(), GameSocketError> {
+        self.send_cmd(BackendCommand::Disconnect {
+            connection: conn.connection_uuid,
+        })
+    }
+}
+
 impl GamePeer {
+    pub fn get_sender(&self) -> Option<GamePeerSender> {
+        self.cmd_tx
+            .as_ref()
+            .map(|tx| GamePeerSender { cmd_tx: tx.clone() })
+    }
     pub fn disconnect(&self, conn: &GameConnection) -> Result<(), GameSocketError> {
         self.send_cmd(BackendCommand::Disconnect { connection: conn.connection_uuid })
     }

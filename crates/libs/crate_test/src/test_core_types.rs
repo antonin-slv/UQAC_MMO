@@ -74,7 +74,7 @@ pub fn test_chunk_borders() {
     println!("Temps moyen/ité : {:?}", duration / iterations);
     println!("--------------------------");
 }
-fn visualize_map(chunks: &[GameChunk], borders: FastSet<(i16, i16)>) {
+fn _visualize_map(chunks: &[GameChunk], borders: FastSet<(i16, i16)>) {
     let chunk_set: FastSet<(i16, i16)> = chunks.iter().map(|c| (c.x, c.y)).collect();
     let border_set = borders;
 
