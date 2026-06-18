@@ -233,8 +233,13 @@ impl BrokerClient {
                         GameMessageHeaders::ChunkHandOff => match payload.extract::<ChunkHandOff>()
                         {
                             Ok(handoff) => {
-                                if handoff.action == ChunkHandOffAction::ReleaseArea {
-                                    shard_manager.on_area_released(client_id);
+                                if handoff.action == ChunkHandOffAction::AeraTook {
+                                    // Un DGS nous informe qu'il vient de prendre cette zone
+                                    for (rect, new_id) in handoff.areas {
+                                        if let Some(new_id) = new_id {
+                                            shard_manager.on_area_took(new_id, rect, &quad_tree);
+                                        }
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -370,7 +375,7 @@ impl BrokerClient {
             .build();
 
         let chunk_hand_off = ChunkHandOff {
-            action: ChunkHandOffAction::ReleaseArea,
+            action: ChunkHandOffAction::ForceReleaseAera,
             areas,
         };
 

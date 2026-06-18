@@ -25,7 +25,6 @@ impl Into<NetComponent> for ControlledBy {
     }
 }
 
-
 #[derive(Component)]
 pub struct EntityTypeComponent(pub EntityType);
 
@@ -122,7 +121,7 @@ pub fn spawn_or_update_entity(
     entity_directory: &mut EntityDirectory,
     current_in_ecs_entities: &mut Query<
         (Entity, &mut Transform, &mut Authority),
-        With<ControlledBy>,
+        (With<ControlledBy>, With<NetworkIdComponent>),
     >,
     recv_entity: &EntityData,
 ) -> Entity {
@@ -150,7 +149,7 @@ pub fn spawn_or_update_entity(
     }
 
     println!(
-        "\t\thad to spawn {} (controlled by {})",
+        "[GameServer] had to spawn {} (controlled by {})",
         recv_entity.net_id, recv_entity.owner_id
     );
     // on arrive ici si l'entité est nouvelle pour nous.
@@ -174,6 +173,27 @@ pub fn spawn_entity(
     let entity_bundle = EntityBundlebase::new(recv_entity.net_id, recv_entity.owner_id, authority);
 
     let mut spawned_id = commands.spawn(entity_bundle);
+
+    let mut has_input = false;
+    let mut must_get_input = false;
+    for component in &recv_entity.updates {
+        match component {
+            NetComponent::Inputs(_) => has_input = true,
+            NetComponent::Type(t_igrec_pe) => {
+                if t_igrec_pe.has_input() {
+                    must_get_input = true;
+                }
+            }
+
+            _ => {}
+        }
+    }
+    if !has_input && must_get_input {
+        let comp = InputComponent {
+            input_buffer: InputBuffer::default(),
+        };
+        insert_net_component(&mut spawned_id, &(comp.into()))
+    }
 
     for component in &recv_entity.updates {
         insert_net_component(&mut spawned_id, component);

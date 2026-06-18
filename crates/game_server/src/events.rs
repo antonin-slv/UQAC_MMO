@@ -1,15 +1,10 @@
 use bevy::prelude::*;
 use broker_protocol::broker_message::NodeId;
 use core_types::chunks::{GameChunk};
+use core_types::helpers::FastSet;
 use game_message::msg_client_server::{InputBuffer, PersonalSnapshot};
 use game_message::msg_dgs::{ChunkDataHandOff, ChunkHandOff, EntityHandOff, SpawnClientMsg};
 use game_message::msg_entities::{NetworkEntityId};
-use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
-
-pub type FastMap<K, V> = FxHashMap<K, V>;
-
-pub type FastSet<K> = FxHashSet<K>;
 
 #[derive(Message)]
 pub struct PlayerConnected {

@@ -1,20 +1,20 @@
 #[cfg(feature = "debug_visual")]
 pub mod bevy_renderer {
     use crate::quadtree::QuadTree;
-    use crate::shard_manager::{Shard, ShardManager};
+    use crate::shard_manager::{Shard, ShardManager, ShardState};
+    use bevy::DefaultPlugins;
     use bevy::app::{App, Startup, Update};
     use bevy::camera::Camera2d;
     use bevy::color::{Color, Srgba};
     use bevy::math::{Isometry2d, Rot2, Vec2};
     use bevy::prelude::{Commands, Gizmos, Query, Res, ResMut, Resource, With};
     use bevy::window::{PrimaryWindow, Window};
-    use bevy::DefaultPlugins;
     use bevy_text_gizmos::TextGizmos;
-    use core_types::chunks::get_chunk_size;
     use core_types::Rect;
+    use core_types::chunks::get_chunk_size;
     use std::collections::HashSet;
-    use std::sync::mpsc::Receiver;
     use std::sync::Mutex;
+    use std::sync::mpsc::Receiver;
 
     #[derive(Resource)]
     pub struct QuadTreeChannelResource {
@@ -95,36 +95,14 @@ pub mod bevy_renderer {
             }
         } else {
             let (start, size) = get_gizmos_area(&quad_tree.bounds, scale);
-
-            // Dessin du rectangle avec les dimensions mises à l'échelle
-            gizmos.rect_2d(start, size, Color::Srgba(Srgba::RED));
-            gizmos.text_2d(
-                start,
-                format!(
-                    "{}\n{}",
-                    quad_tree.shard_id,
-                    shard_manager
-                        .shards
-                        .get(&quad_tree.shard_id)
-                        .unwrap_or(&Shard {
-                            dgs: Some(0),
-                            entities: HashSet::new()
-                        })
-                        .dgs
-                        .unwrap_or(0)
-                )
-                .as_str(),
-                16.0 - quad_tree.depth as f32,
-                Vec2::ZERO,
-                Color::WHITE,
-            );
-            let (start, size) = get_gizmos_area(&quad_tree.bounds, scale);
             let dgs = shard_manager
                 .shards
                 .get(&quad_tree.shard_id)
                 .unwrap_or(&Shard {
                     dgs: Some(0),
                     entities: HashSet::new(),
+                    parent_id: None,
+                    state: ShardState::Active,
                 })
                 .dgs
                 .unwrap_or(0);

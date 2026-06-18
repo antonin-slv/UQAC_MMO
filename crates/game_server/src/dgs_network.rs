@@ -61,6 +61,7 @@ pub struct ServerStats {
 #[derive(Resource)]
 pub struct BrockerManager {
     pub client: MmoNetworkClient,
+    pub not_found_count : u8
 }
 #[derive(Resource)]
 pub struct HeartBeatTimer {
@@ -162,6 +163,7 @@ impl Plugin for NetworkPlugin {
         app.insert_resource(NetworkIdGenerator::default()) // server_id sera mis à jour après le handshake)
             .insert_resource(BrockerManager {
                 client: broker_client,
+                not_found_count: 0,
             })
             .insert_resource(HeartBeatTimer {
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
@@ -182,8 +184,8 @@ impl Plugin for NetworkPlugin {
             .add_message::<ChunkHandOffMessage>()
             .add_message::<EntityTransferEvent>();
 
-        app.add_systems(PreUpdate, network_bridge_system.in_set(NetworkSet));
-        app.add_systems(Update, send_heartbeat_system.in_set(NetworkSet));
+        app.add_systems(FixedPreUpdate, network_bridge_system.in_set(NetworkSet));
+        app.add_systems(FixedUpdate, send_heartbeat_system.in_set(NetworkSet));
 
         println!("\n[Server] Network plugin initialized.\n");
     }
@@ -235,8 +237,6 @@ fn network_bridge_system(
                 });
                 server_info.server_broker_id = my_id;
                 net_idgenerator.server_id = Some(my_id);
-
-                println!("[Server] Handshake validé. Connecté au Broker PubSub.");
 
                 // 1. Abonnement à l'attribution de chunks
                 // Le serveur écoute l'orchestrateur pour savoir de quelles cellules il est responsable
