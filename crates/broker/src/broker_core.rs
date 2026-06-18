@@ -1,7 +1,7 @@
-﻿use indexmap::IndexSet;
+﻿#![allow(unused)]
+use indexmap::IndexSet;
 use nohash_hasher::IntSet;
 use rustc_hash::FxHashMap;
-use std::env;
 use uuid::Uuid;
 
 use broker_protocol::broker_message::BrokerMessage::{BroadCastFrom, Broadcast};
@@ -15,9 +15,6 @@ use game_sockets::{GameConnection, GameNetworkEvent, GamePeer, GameStream};
 pub type FastMap<K, V> = FxHashMap<K, V>;
 pub type FastSet<K> = IntSet<K>;
 pub type FastIterableSet<K> = IndexSet<K>;
-
-const CLIENT_LISTEN_PORT_ENV_NAME: &str = "BROKER_PUBLIC_PORT";
-const SERVER_LISTEN_PORT_ENV_NAME: &str = "BROKER_PRIVATE_PORT";
 
 pub struct Broker {
     public_peer: GamePeer,
@@ -39,25 +36,12 @@ pub struct Broker {
 
     // Pour la déconnexion
     node_id_to_topics: FastMap<NodeId, FastIterableSet<Topic>>,
-}
 
-impl Default for Broker {
-    fn default() -> Self {
-        Self::new()
-    }
+    with_logs: bool,
 }
 
 impl Broker {
-    pub fn new() -> Self {
-        let public_port = env::var(CLIENT_LISTEN_PORT_ENV_NAME)
-            .unwrap_or_else(|_| "8000".into())
-            .parse()
-            .unwrap_or(8000);
-        let private_port = env::var(SERVER_LISTEN_PORT_ENV_NAME)
-            .unwrap_or_else(|_| "8001".into())
-            .parse()
-            .unwrap_or(8001);
-
+    pub fn new(public_port: u16, private_port: u16) -> Self {
         let public_peer = GamePeer::new(QuicBackend::new());
         let private_peer = GamePeer::new(QuicBackend::new());
 
@@ -86,10 +70,12 @@ impl Broker {
             client_subscribers: FastMap::default(),
             server_subscribers: FastMap::default(),
             node_id_to_topics: FastMap::default(),
+            with_logs: true,
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, with_logs: bool) {
+        self.with_logs = with_logs;
         loop {
             while let Ok(Some(event)) = self.public_peer.poll() {
                 self.handle_public_event(event);
@@ -123,6 +109,7 @@ impl Broker {
                 println!("[RÉSEAU] Client déconnecté : ID {}", node_id);
                 Namespace::ClientAuth
             };
+
             let system_topic = TopicBuilder::new(SecurityDomain::PrivateRW, namespace).build();
 
             let mock_stream = GameStream::new(RELIABLE_STREAM_ID, Reliable);
@@ -155,7 +142,9 @@ impl Broker {
                         .append_id(id)
                         .build();
                 self.node_subscribe(id, direct_line_topic);
-                println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
+                if self.with_logs {
+                    println!("[RÉSEAU PUBLIC] Nouveau client connecté : ID {}", id);
+                }
             }
 
             GameNetworkEvent::StreamCreated(connection, stream) => {
@@ -284,14 +273,18 @@ impl Broker {
                         .change_security_domain(SecurityDomain::PrivateRW)
                         .build(),
                 );
-                println!(
-                    "[RÉSEAU PRIVÉ] Nouveau Serveur Backend connecté : ID {:X}",
-                    id
-                );
+                if self.with_logs {
+                    println!(
+                        "[RÉSEAU PRIVÉ] Nouveau Serveur Backend connecté : ID {:X}",
+                        id
+                    );
+                }
             }
+
             GameNetworkEvent::Disconnected(conn) => {
                 self.handle_disconnect(conn.connection_uuid);
             }
+
             GameNetworkEvent::StreamCreated(connection, stream) => {
                 let Some(&node_id) = self.uuid_to_node_id.get(&connection.connection_uuid) else {
                     return;
@@ -354,7 +347,9 @@ impl Broker {
                     }
                     BrokerMessage::AuthorizeClient(node_id) => {
                         if self.not_authenticated_clients.remove(&node_id) {
-                            println!("[RÉSEAU PRIVÉ] Badge accordé à {}", node_id);
+                            if self.with_logs {
+                                println!("[RÉSEAU PRIVÉ] Badge accordé à {}", node_id);
+                            }
                         }
                     }
                     BrokerMessage::KickNode(node_id) => {

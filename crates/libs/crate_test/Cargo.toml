@@ -4,4 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-core_types = {workspace = true}
+core_types = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+game_sockets = { workspace = true }
+broker_protocol = { workspace = true }
+broker_client = { workspace = true }
+game_message = { workspace = true }
+
+
+
+#brokers
+broker = { path = "../../broker" }

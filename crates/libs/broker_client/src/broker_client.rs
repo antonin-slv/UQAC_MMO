@@ -32,6 +32,7 @@ pub struct MmoNetworkClient {
     stream_unreliable: GameStream,
     stream_reliable: GameStream,
     is_ready: bool,
+    pub comment_enabled: bool
 }
 
 impl MmoNetworkClient {
@@ -46,6 +47,7 @@ impl MmoNetworkClient {
             stream_unreliable: GameStream::new(0, GameStreamReliability::Unreliable),
             stream_reliable: GameStream::new(RELIABLE_STREAM_ID, GameStreamReliability::Reliable),
             is_ready: false,
+            comment_enabled : true
         }
     }
 
@@ -94,10 +96,13 @@ impl MmoNetworkClient {
                             if !self.is_ready {
                                 self.node_id = Some(node_id);
                                 self.is_ready = true;
-                                println!(
-                                    "[BrokerClient] Message Welcome reçu. ID officiel : {:X}. Client Ready !",
-                                    node_id
-                                );
+                                if self.comment_enabled {
+                                    println!(
+                                        "[BrokerClient] Message Welcome reçu. ID officiel : {:X}. Client Ready !",
+                                        node_id
+                                    );
+                                }
+
                                 return Some(ClientNetworkEvent::Ready);
                             }
                             continue;
