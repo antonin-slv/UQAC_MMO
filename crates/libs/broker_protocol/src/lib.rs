@@ -14,9 +14,7 @@ mod tests {
     pub fn test_generic_unpacker() {
         let area = GameChunkAera { x_min: 0, x_max: 2, y_min: 0, y_max: 2 };
         let first_layer = Topic::security_namespace_as_u8(SecurityDomain::PublicReadPrivateWrite, Namespace::Chunk);
-
-        let min = 0;
-        let max = 1;
+        
         let pattern_area = TopicPattern::new()
             .with_fixed(vec![first_layer])
             .with_layers(area)

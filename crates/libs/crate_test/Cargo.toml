@@ -15,9 +15,4 @@ game_message = { workspace = true }
 
 
 #brokers
-rustc-hash = { version = "2.1", default-features = false, features = ["std"] }
-uuid = { workspace = true }
-nohash-hasher = "0.2"
-indexmap = "2.14.0"
-dashmap = "7.0.0-rc2"
-crossbeam-channel = "0.5.15"
+broker = { path = "../../broker" }

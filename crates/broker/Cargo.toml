@@ -10,3 +10,5 @@ uuid = { workspace = true }
 nohash-hasher = "0.2"
 indexmap = "2.14.0"
 broker_protocol = { workspace = true }
+dashmap = "7.0.0-rc2"
+crossbeam-channel = "0.5.15"

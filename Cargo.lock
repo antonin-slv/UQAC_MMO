@@ -2010,6 +2010,8 @@ name = "broker"
 version = "0.1.0"
 dependencies = [
  "broker_protocol",
+ "crossbeam-channel",
+ "dashmap",
  "game_sockets",
  "indexmap",
  "nohash-hasher",
@@ -2449,19 +2451,14 @@ dependencies = [
 name = "crate_test"
 version = "0.1.0"
 dependencies = [
+ "broker",
  "broker_client",
  "broker_protocol",
  "bytes",
  "core_types",
- "crossbeam-channel",
- "dashmap",
  "game_message",
  "game_sockets",
- "indexmap",
- "nohash-hasher",
- "rustc-hash 2.1.2",
  "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -2550,6 +2547,20 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+
+[[package]]
+name = "dashmap"
+version = "7.0.0-rc2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a1e35a65fe0538a60167f0ada6e195ad5d477f6ddae273943596d4a1a5730b"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "equivalent",
+ "hashbrown 0.15.5",
+ "lock_api",
+ "parking_lot_core",
+]
 
 [[package]]
 name = "dasp_sample"
