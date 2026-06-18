@@ -80,7 +80,6 @@ impl BrokerClient {
                 ClientNetworkEvent::Ready => {
                     println!("[Server] Connection ready");
 
-                    // Auth to broker
                     let msg = ServerHelloMSG {
                         server_type: ServerType::Spatial,
                         id: self.broker_api.node_id.unwrap_or_else(|| {
@@ -154,8 +153,6 @@ impl BrokerClient {
                             } else {
                                 if removed_node_id.is_server() {
                                     shard_manager.on_dgs_stopped(removed_node_id);
-                                } else if removed_node_id.is_client() {
-                                    shard_manager.on_client_disconnected(removed_node_id);
                                 }
                             }
                         }
@@ -234,7 +231,6 @@ impl BrokerClient {
                         {
                             Ok(handoff) => {
                                 if handoff.action == ChunkHandOffAction::AeraTook {
-                                    // Un DGS nous informe qu'il vient de prendre cette zone
                                     for (rect, new_id) in handoff.areas {
                                         if let Some(new_id) = new_id {
                                             shard_manager.on_area_took(new_id, rect, &quad_tree);
@@ -301,7 +297,7 @@ impl BrokerClient {
             client_id, msg.pseudo
         );
 
-        let con_ok = true; // AUTHENTIFICATION ICI !
+        let con_ok = true;
 
         if !con_ok {
             println!(
@@ -333,7 +329,6 @@ impl BrokerClient {
                 .append_id(dgs)
                 .build();
 
-            // B) Dire au server de faire spawn :
             let msg = SpawnClientMsg {
                 client_id,
                 pseudo: msg.pseudo.to_string(),

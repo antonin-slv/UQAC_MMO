@@ -3,24 +3,19 @@ use crate::shard_manager::ShardManager;
 use core_types::{Rect, Vec2};
 use game_message::msg_entities::NetworkEntityId;
 use std::collections::HashMap;
-// Ajout de l'import
+
 use std::env;
 use std::hash::{Hash, Hasher};
 
 pub type ShardId = u32;
 
 pub trait ShardIdExt {
-    /// Retourne l'ID du parent direct (None si c'est la racine 0)
     fn parent(self) -> Option<ShardId>;
 
-    /// Retourne l'index de cet ID par rapport à son parent (0, 1, 2 ou 3)
     fn child_index(self) -> Option<usize>;
 
-    /// Retourne l'ID de l'enfant à l'index donné
     fn child(self, index: u32) -> ShardId;
 
-    /// Si le `target` est un descendant de `self`, retourne l'index (0..4)
-    /// de l'enfant direct de `self` dans lequel il faut descendre.
     fn child_index_towards(self, target: ShardId) -> Option<usize>;
 }
 
@@ -165,7 +160,6 @@ impl QuadTree {
         shard_manager: &mut ShardManager,
         broker: &BrokerClient,
     ) {
-        //println!("Managed subdivisions : {:?}", subdivided_shards);
         for (new_shard, parent) in subdivided_shards {
             let sub_shard = self.get_shard_bounds(&new_shard);
             if let Some((sub_shard_bounds, is_leaf)) = sub_shard {
@@ -272,7 +266,6 @@ impl QuadTree {
         subdivided_shards
     }
 
-    // NOUVELLE VERSION DE TRY_MERGE
     pub fn try_merge(
         &mut self,
         shard_manager: &mut ShardManager,
@@ -281,18 +274,16 @@ impl QuadTree {
         let entity_count = self.count_entities(shard_manager);
 
         if self.children.is_some() {
-            // L'approche "top-down" garantit l'optimisation voulue : on attrape le parent le plus haut.
             if entity_count < self.merge_threshold && self.depth > 0 {
                 let destroyed = self.merge(shard_manager);
                 if !destroyed.is_empty() {
                     merges.insert(self.shard_id, destroyed);
                 }
             } else {
-                // Si on ne peut pas merge ce niveau, on regarde si les enfants le peuvent.
                 if let Some(children) = self.children.as_mut() {
                     for child in children.iter_mut() {
                         let child_merges = child.try_merge(shard_manager);
-                        merges.extend(child_merges); // On compile toutes les fusions qui se passent en bas
+                        merges.extend(child_merges);
                     }
                 }
             }
@@ -310,34 +301,28 @@ impl QuadTree {
         count
     }
 
-    // NOUVELLE VERSION DE MERGE
     fn merge(&mut self, shard_manager: &mut ShardManager) -> Vec<(ShardId, Rect)> {
         let mut destroyed_shards: Vec<(ShardId, Rect)> = Vec::new();
 
-        // On délègue la récolte à une fonction récursive pour bien vider la totalité de l'arbre
         self.collect_and_destroy_descendants(shard_manager, self.shard_id, &mut destroyed_shards);
 
         destroyed_shards
     }
 
-    // NOUVEAU : Fonction récursive pour détruire et drainer tous les niveaux enfants
     fn collect_and_destroy_descendants(
         &mut self,
         shard_manager: &mut ShardManager,
         target_shard_id: ShardId,
         destroyed_shards: &mut Vec<(ShardId, Rect)>,
     ) {
-        // En utilisant `.take()`, on met implicitement `self.children = None`
         if let Some(mut children) = self.children.take() {
             for child in children.iter_mut() {
-                // On descend d'abord profondément pour aplatir les petits-enfants
                 child.collect_and_destroy_descendants(
                     shard_manager,
                     target_shard_id,
                     destroyed_shards,
                 );
 
-                // Puis on draine les entités de l'enfant courant vers le parent cible (target)
                 for entity in shard_manager.drain_entities(child.shard_id).iter() {
                     shard_manager.set_entity_shard(target_shard_id, entity.clone());
                 }
@@ -360,11 +345,9 @@ impl QuadTree {
         if *shard_id == self.shard_id {
             return Some((self.bounds.clone(), self.children.is_none()));
         }
-        // 2. Ce n'est pas le nœud actuel, on cherche dans les enfants (s'ils existent)
+
         if let Some(children) = &self.children {
-            // Au lieu de boucler, on calcule mathématiquement quel enfant contient la cible
             if let Some(child_idx) = self.shard_id.child_index_towards(*shard_id) {
-                // On descend uniquement dans l'enfant pertinent
                 return children[child_idx].get_shard_bounds(shard_id);
             }
         }

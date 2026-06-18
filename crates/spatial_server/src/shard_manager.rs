@@ -4,17 +4,17 @@ use broker_protocol::broker_message::NodeId;
 use core_types::{Rect, Vec2};
 use game_message::msg_dgs::Heartbeat;
 use game_message::msg_entities::NetworkEntityId;
-use rand::random_range;
 use rand::RngExt;
 use rand::prelude::IteratorRandom;
+use rand::random_range;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ShardState {
     Active,
-    PendingSplit, // En train de se diviser, mais garde le contrôle
-    PendingDestroy, //en train de se faire casser la figure (le parent se merge)
-    PendingReady, // Créé et avec un DGS, mais attend la fin du/des transfert P2P
+    PendingSplit,
+    PendingDestroy,
+    PendingReady,
 }
 
 #[derive(Clone, Debug)]
@@ -77,8 +77,6 @@ impl ShardManager {
         bounds: Rect,
         broker: &BrokerClient,
     ) {
-        //broker.spawn_new_dgs(1);
-
         println!("On new shard ! : {:?}", shard_id);
 
         let mut old_dgs_id = None;
@@ -98,7 +96,6 @@ impl ShardManager {
 
             *shard_assignment = Some(shard_id);
 
-            // Envoi au DGS de la demande de transfert (P2P via TakeArea)
             broker.assign_shard_to_dgs(new_dgs_id.clone(), vec![(bounds, old_dgs_id)]);
 
             self.shards.insert(
@@ -115,7 +112,7 @@ impl ShardManager {
                 "⏳ Aucun DGS libre. Shard {:?} mis en file d'attente.",
                 shard_id
             );
-            // Fallback sécuritaire (à améliorer plus tard)
+
             self.shards.insert(
                 shard_id,
                 Shard {
@@ -134,10 +131,12 @@ impl ShardManager {
         children: Vec<(ShardId, Rect)>,
         broker: &BrokerClient,
     ) {
-        println!("🔄 [Merge] Demande de fusion pour le parent {:?}", parent_id);
+        println!(
+            "🔄 [Merge] Demande de fusion pour le parent {:?}",
+            parent_id
+        );
         let mut areas_to_take = Vec::new();
 
-        // 1. On fige les enfants et on les enregistre dans l'Overlay
         for (child_id, child_bounds) in children {
             if let Some(child_shard) = self.shards.get_mut(&child_id) {
                 child_shard.state = ShardState::PendingDestroy;
@@ -146,7 +145,6 @@ impl ShardManager {
             }
         }
 
-        // 2. On trouve le gros serveur parent qui va tout absorber
         if let Some((new_dgs, shard_assignment)) = self
             .active_dgs
             .iter_mut()
@@ -155,7 +153,10 @@ impl ShardManager {
             let new_dgs_id = new_dgs.clone();
             *shard_assignment = Some(parent_id);
 
-            println!("✅ [Merge] DGS {} prêt à absorber les sous-zones.", new_dgs_id);
+            println!(
+                "✅ [Merge] DGS {} prêt à absorber les sous-zones.",
+                new_dgs_id
+            );
             broker.assign_shard_to_dgs(new_dgs_id.clone(), areas_to_take);
 
             self.shards.insert(
@@ -164,11 +165,17 @@ impl ShardManager {
                     entities: HashSet::new(),
                     dgs: Some(new_dgs_id),
                     state: ShardState::PendingReady,
-                    parent_id: parent_id.parent()
+                    parent_id: parent_id.parent(),
                 },
             );
         } else {
-            println!("⏳ [Merge] Aucun DGS libre. Parent {:?} en file d'attente.", parent_id);
+            println!(
+                "⏳ [Merge] Aucun DGS libre. Parent {:?} en file d'attente.",
+                parent_id
+            );
+            for dgs in self.active_dgs.iter() {
+                println!("DGS : {} : {:?}", dgs.0, dgs.1);
+            }
             self.shards.insert(
                 parent_id,
                 Shard {
@@ -181,10 +188,7 @@ impl ShardManager {
         }
     }
 
-    // Nouvelle version : Le DGS s'identifie avec son NodeId et la zone (Rect) qu'il a fini de charger
     pub fn on_area_took(&mut self, dgs_id: NodeId, bounds: Rect, quad_tree: &QuadTree) {
-
-        // vérif si c'est un merge
         let mut merged_child_id = None;
         for (&child_id, &rect) in self.pending_merges.iter() {
             if rect == bounds {
@@ -193,53 +197,53 @@ impl ShardManager {
             }
         }
 
-        //execution merge
         if let Some(child_id) = merged_child_id {
-            self.pending_merges.remove(&child_id); // Retire la zone de la file d'attente
+            self.pending_merges.remove(&child_id);
 
-            if let Some(child_shard) = self.shards.remove(&child_id) { // On supprime le shard mort
-
-                // MAGIE : Le serveur DGS de l'enfant est vide, on le remet dans le pool des serveurs libres !
+            if let Some(child_shard) = self.shards.remove(&child_id) {
                 if let Some(child_dgs) = child_shard.dgs {
                     self.active_dgs.insert(child_dgs, None);
                 }
 
-                println!("✅ [Merge] Sous-zone {:?} absorbée. Serveur enfant libéré.", bounds);
+                println!(
+                    "✅ [Merge] Sous-zone {:?} absorbée. Serveur enfant libéré.",
+                    bounds
+                );
 
-                // On regarde si toutes les zones de ce parent ont été absorbées
                 if let Some(parent_id) = child_shard.parent_id {
                     let still_has_children = self.pending_merges.keys().any(|&id| {
-                        self.shards.get(&id).map_or(false, |s| s.parent_id == Some(parent_id))
+                        self.shards
+                            .get(&id)
+                            .map_or(false, |s| s.parent_id == Some(parent_id))
                     });
 
                     if !still_has_children {
                         if let Some(parent_shard) = self.shards.get_mut(&parent_id) {
                             parent_shard.state = ShardState::Active;
-                            println!("🎉 [Merge] Téléchargement total réussi ! Parent {} Actif.", parent_id);
+                            println!(
+                                "🎉 [Merge] Téléchargement total réussi ! Parent {} Actif.",
+                                parent_id
+                            );
                         }
                     }
                 }
             }
-            return; // C'était un Merge, on arrête ici !
+            return;
         }
 
-
-        //gestion du split.
         let mut target_shard_id = None;
 
-        // 1. Trouver à quel ShardId correspond ce DGS et ce Rect
         for (&shard_id, shard) in self.shards.iter() {
             if shard.dgs == Some(dgs_id.clone()) {
                 if let Some((shard_bounds, _)) = quad_tree.get_shard_bounds(&shard_id) {
                     if shard_bounds == bounds {
                         target_shard_id = Some(shard_id);
-                        break; // On a trouvé, on arrête la boucle
+                        break;
                     }
                 }
             }
         }
 
-        // 2. Si on a identifié le shard, on procède au Handoff
         if let Some(child_shard_id) = target_shard_id {
             let mut parent_id_to_check = None;
 
@@ -247,16 +251,21 @@ impl ShardManager {
                 if child_shard.state == ShardState::PendingReady {
                     child_shard.state = ShardState::Active;
                     parent_id_to_check = child_shard.parent_id;
-                    println!("✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {} !", bounds, dgs_id);
+                    println!(
+                        "✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {} !",
+                        bounds, dgs_id
+                    );
                 }
             }
 
-            // 3. Vérification de la destruction du parent
             if let Some(parent_id) = parent_id_to_check {
                 let is_fully_transferred = self.check_if_parent_fully_transferred(parent_id);
 
                 if is_fully_transferred {
-                    println!("🎉 [Handoff] Toutes les sous-zones du parent {} ont confirmé (AreaTook). Destruction du parent.", parent_id);
+                    println!(
+                        "🎉 [Handoff] Toutes les sous-zones du parent {} ont confirmé (AreaTook). Destruction du parent.",
+                        parent_id
+                    );
                     self.shards.remove(&parent_id);
                 }
             }
@@ -274,14 +283,13 @@ impl ShardManager {
         for shard in self.shards.values() {
             if shard.parent_id == Some(parent_id) {
                 has_children = true;
-                // Si au moins un enfant est encore en attente, le transfert n'est pas fini
+
                 if shard.state == ShardState::PendingReady {
                     return false;
                 }
             }
         }
 
-        // Retourne vrai seulement s'il avait des enfants ET qu'aucun n'est en attente
         has_children
     }
 
@@ -313,7 +321,6 @@ impl ShardManager {
     pub fn on_new_dgs(&mut self, dgs_id: NodeId, quad_tree: &QuadTree, broker: &BrokerClient) {
         let mut waiting_shard_info = None;
 
-        // 1. Chercher s'il y a un shard qui attend un serveur
         if let Some((&shard_id, shard)) = self
             .shards
             .iter_mut()
@@ -323,14 +330,12 @@ impl ShardManager {
             waiting_shard_info = Some((shard_id, shard.parent_id));
         }
 
-        // 2. Si on a trouvé un shard, on procède à l'assignation
         if let Some((shard_id, parent_id)) = waiting_shard_info {
             println!(
                 "✅ Nouveau DGS assigné au shard en attente : {:?}",
                 shard_id
             );
 
-            // On retrouve le DGS du parent pour que le nouveau DGS puisse lui voler les entités (P2P)
             let mut old_dgs_id = None;
             if let Some(p_id) = parent_id {
                 if let Some(parent_shard) = self.shards.get(&p_id) {
@@ -339,7 +344,6 @@ impl ShardManager {
             }
 
             if let Some((bounds, _)) = quad_tree.get_shard_bounds(&shard_id) {
-                // On passe bien old_dgs_id (qui n'est plus None)
                 broker.assign_shard_to_dgs(dgs_id.clone(), vec![(bounds, old_dgs_id)]);
             } else {
                 println!("No bounds found for shard {:?}", shard_id);
@@ -347,7 +351,6 @@ impl ShardManager {
 
             self.active_dgs.insert(dgs_id, Some(shard_id));
         } else {
-            // Aucun shard n'était en attente, le serveur rentre dans le pool des serveurs inactifs
             self.active_dgs.insert(dgs_id, None);
         }
     }
@@ -370,32 +373,12 @@ impl ShardManager {
                 shard.dgs = None;
             }
         }
-    }
-
-    pub fn on_client_disconnected(&mut self, client_id: NodeId) {
-        //println!("Client disconnected : {:?}", client_id);
-        //let shard_id = self
-        //    .entities
-        //    .iter()
-        //    .find(|(_, entity_mapping)| client_id == entity_mapping.client_id.clone());
-        //if let Some((entity_id, entity_mapping)) = shard_id {
-        //    println!(
-        //        "Remove client {} from shard {}",
-        //        client_id, entity_mapping.shard_id
-        //    );
-        //    self.remove_entity_from_shard(entity_mapping.shard_id.clone(), entity_id.clone());
-        //} else {
-        //    println!("No shard found for client : {}", client_id)
-        //}
+        self.active_dgs.insert(dgs_id, None);
     }
 
     pub fn set_entity_shard(&mut self, shard_id: ShardId, entity: Entity) {
         let old_shard_id = self.get_shard(entity.id);
-        //println!("Entities : {:?}", self.entities);
-        //println!(
-        //    "New Shard iD : {} / Old Shard ID: {:?}",
-        //    shard_id, old_shard_id
-        //);
+
         if let Some(old_shard_id) = old_shard_id
             && old_shard_id != shard_id
         {
@@ -444,12 +427,10 @@ impl ShardManager {
     }
 
     pub fn get_dgs_for_position(&self, position: Vec2, quad_tree: &QuadTree) -> Option<NodeId> {
-
-        // OVERLAY DE FUSION : On intercepte les joueurs qui sont dans des zones en train de mourir
         for (&child_id, rect) in self.pending_merges.iter() {
             if rect.contains(position) {
                 if let Some(shard) = self.shards.get(&child_id) {
-                    return shard.dgs; // On renvoie le serveur du petit enfant en sursis
+                    return shard.dgs;
                 }
             }
         }
@@ -457,10 +438,8 @@ impl ShardManager {
         if let Some(shard_id) = quad_tree.get_shard_of_point(position) {
             let mut current_shard_id = shard_id;
 
-            // On remonte l'arbre si la zone est en pleine transition
             while let Some(shard) = self.shards.get(&current_shard_id) {
                 if shard.state == ShardState::PendingReady {
-                    // L'enfant n'est pas encore prêt, on remonte à l'ancien propriétaire (parent)
                     if let Some(parent) = shard.parent_id {
                         if let Some(parent_shard) = self.shards.get(&parent) {
                             if parent_shard.dgs.is_some() {
@@ -471,7 +450,6 @@ impl ShardManager {
                     }
                 }
 
-                // Si le shard est Active ou PendingSplit, c'est lui le vrai patron actuel
                 return shard.dgs;
             }
         }
@@ -506,14 +484,12 @@ impl ShardManager {
     pub fn get_random_spawn_point(&self) -> Option<Vec2> {
         let mut rng = rand::rng();
 
-        // 1. Collecter toutes les entités existantes
         let all_entities: Vec<&Entity> = self
             .shards
             .values()
             .flat_map(|shard| shard.entities.iter())
             .collect();
 
-        // 2. Choisir une entité aléatoire si la liste n'est pas vide
         let random_entity = all_entities.iter().cloned().choose(&mut rng)?;
 
         let position = Vec2::new(
