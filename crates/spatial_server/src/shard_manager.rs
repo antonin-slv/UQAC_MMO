@@ -89,18 +89,6 @@ impl ShardManager {
             }
         }
 
-        if !self.shards.contains_key(&shard_id) {
-            self.shards.insert(
-                shard_id,
-                Shard {
-                    entities: HashSet::new(),
-                    dgs: None,
-                    state: ShardState::PendingReady,
-                    parent_id: parent,
-                },
-            );
-        }
-
         if let Some((new_dgs, shard_assignment)) = self
             .active_dgs
             .iter_mut()
