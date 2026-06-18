@@ -1,5 +1,5 @@
 use crate::GameNetworkEvent::StreamCreated;
-use crate::GameStreamReliability::{Reliable, Unreliable};
+use crate::GameStreamReliability::Reliable;
 use crate::{
     BackendCommand, GameNetworkEvent, GameSocketBackend, GameSocketError, GameStream,
     GameStreamReliability,
@@ -32,7 +32,7 @@ impl ServerCertVerifier for SkipServerVerification {
         _end_entity: &rustls::Certificate,
         _intermediates: &[rustls::Certificate],
         _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item=&[u8]>,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp_response: &[u8],
         _now: std::time::SystemTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
@@ -63,7 +63,9 @@ fn make_server_config() -> (quinn::ServerConfig, Vec<u8>) {
     transport_config.congestion_controller_factory(Arc::new(bbr_config));
 
     // Disable Datagram Pacing (Critical for "Unreliable" lane)
-    transport_config.datagram_send_buffer_size(0); // 0 means "send immediately or drop" for some impls, but larger buffer with BBR is safer.
+    // 0 means "send immediately or drop" for some impls, but larger buffer with BBR is safer.
+    // ANOTNIN : This is only used on our broker, so there will always be a lot of messages, to send.
+    transport_config.datagram_send_buffer_size(1024*512);
 
     // Boost Timers for fast "Lost Packet" detection
     // Default initial RTT is 333ms. Set it to a realistic gaming value (e.g., 15ms).
@@ -86,11 +88,11 @@ fn make_client_config() -> quinn::ClientConfig {
     let mut client_config = quinn::ClientConfig::new(Arc::new(crypto));
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.datagram_receive_buffer_size(Some(1024 * 1024));
-    transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
 
     let bbr_config = BbrConfig::default();
     transport_config.congestion_controller_factory(Arc::new(bbr_config));
-    transport_config.datagram_send_buffer_size(0);
+    transport_config.datagram_send_buffer_size(128);
     transport_config.initial_rtt(Duration::from_millis(15));
     transport_config.keep_alive_interval(Some(Duration::from_secs(1)));
 
@@ -101,7 +103,7 @@ fn make_client_config() -> quinn::ClientConfig {
 
 pub struct QuicBackend {
     connections: HashMap<Uuid, Connection>,
-    reliable_send_streams: HashMap<(Uuid, u16), SendStream>,
+    reliable_senders: HashMap<(Uuid, u16), mpsc::Sender<Bytes>>,
     unreliable_send_streams: Vec<(Uuid, u16)>,
 }
 
@@ -124,15 +126,38 @@ impl GameSocketBackend for QuicBackend {
 
                     Some((uuid, stream, stream_pair)) = stream_reg_rx.recv() => {
                         if stream.is_reliable() && stream_pair.is_some(){
-                            let stream_pair = stream_pair.expect("Checked earlier that stream_pair is Some for reliable streams.");
-                            self.reliable_send_streams.insert((uuid, stream.stream_id), stream_pair);
-                        } else {
-                            if self.unreliable_send_streams.contains(&(uuid, stream.stream_id)) {
-                                continue;
-                            }
-                            self.unreliable_send_streams.push((uuid, stream.stream_id));
-                        }
+                            let mut send_stream = stream_pair.unwrap();
+                            let event_tx_clone = event_tx.clone();
 
+                            // 1. On crée un canal de communication pour ce flux spécifique
+                            // (Capacité de 256 paquets en attente pour absorber les pics)
+                            let (tx, mut rx) = mpsc::channel::<Bytes>(256);
+
+                            // 2. On stocke le bout "Transmission"
+                            self.reliable_senders.insert((uuid, stream.stream_id), tx);
+
+                            // 3. On lance une tâche isolée pour gérer l'écriture sur le réseau
+                            tokio::spawn(async move {
+                                while let Some(data) = rx.recv().await {
+                                    let mut frame = BytesMut::with_capacity(4 + data.len());
+                                    frame.put_u32(data.len() as u32);
+                                    frame.put(data);
+
+                                    // Ce .await ne bloquera QUE la tâche de ce joueur spécifique
+                                    if let Err(e) = send_stream.write_all(&frame).await {
+                                        let _ = event_tx_clone.send(GameNetworkEvent::Error {
+                                            connection: uuid.into(),
+                                            inner: GameSocketError::SendFailed{ inner_msg: e.to_string()}
+                                        });
+                                        break; // Ferme la boucle si la socket est cassée
+                                    }
+                                }
+                            });
+                        } else {
+                            if !self.unreliable_send_streams.contains(&(uuid, stream.stream_id)) {
+                                self.unreliable_send_streams.push((uuid, stream.stream_id));
+                            }
+                        }
                         let _ = event_tx.send(StreamCreated(uuid.into(), stream.clone()));
                     }
 
@@ -204,23 +229,12 @@ impl GameSocketBackend for QuicBackend {
                                 if let Some(conn) = self.connections.get(&connection) {
                                     if stream.is_reliable() {
                                         let key = (connection, stream.stream_id);
-                                        let Some(send_stream) = self.reliable_send_streams.get_mut(&key) else {
-                                            error!("No stream found for {:?}.", stream.stream_id);
-                                            continue;
-                                        };
-
-                                        let mut frame = BytesMut::with_capacity(4 + data.len());
-                                        frame.put_u32(data.len() as u32);
-                                        frame.put(data);
-                                        match send_stream.write_all(&frame).await {
-                                            Ok(_) => (),
-                                            Err(e)=> {
-                                                let _ = event_tx.send(GameNetworkEvent::Error {
-                                                    connection: connection.into(),
-                                                    inner: GameSocketError::SendFailed{ inner_msg: e.to_string()}
-                                                });
-                                                error!("Error sending packet: {:?}", e)
+                                        if let Some(sender_channel) = self.reliable_senders.get(&key) {
+                                            if let Err(e) = sender_channel.try_send(data) {
+                                                error!("Send Buffer already filled for stream {:?}: {:?}", stream.stream_id, e);
                                             }
+                                        } else {
+                                            error!("No stream found for {:?}", stream.stream_id);
                                         }
                                     } else {
                                         let mut packet = BytesMut::with_capacity(2 + data.len());
@@ -257,7 +271,8 @@ impl GameSocketBackend for QuicBackend {
                             },
                             BackendCommand::CloseStream { connection, stream } => {
                                 let key = (connection, stream);
-                                self.reliable_send_streams.remove(&key);
+                                //self.reliable_send_streams.remove(&key);
+                                let _ =  self.reliable_senders.remove(&key);
                                 self.unreliable_send_streams.retain(|x| x != &key);
                                 let _ = event_tx.send(GameNetworkEvent::StreamClosed(connection.into(), stream.into()));
                             },
@@ -265,8 +280,9 @@ impl GameSocketBackend for QuicBackend {
                                 // On retire la connexion de la HashMap locale
                                 if let Some(conn) = self.connections.remove(&connection) {
                                     // On demande à Quinn de fermer proprement la socket avec le code d'erreur 0
-                                    
-                                    self.reliable_send_streams.retain(|(uuid, _), _| uuid != &connection);
+                                    // self.reliable_send_streams.retain(|(uuid, _), _| uuid != &connection);
+                                    // à priori les channels associés sont tués par fin de référencement.
+                                    self.reliable_senders.retain(|(uuid, _), _| uuid != &connection);
                                     self.unreliable_send_streams.retain(|x| x.0 != connection);
                                     conn.close(0u32.into(), b"Kicked by Server");
                                 }
@@ -283,8 +299,9 @@ impl QuicBackend {
     pub fn new() -> Self {
         Self {
             connections: HashMap::new(),
-            reliable_send_streams: HashMap::new(),
+            //reliable_send_streams: HashMap::new(),
             unreliable_send_streams: Vec::new(),
+            reliable_senders: HashMap::new(),
         }
     }
 

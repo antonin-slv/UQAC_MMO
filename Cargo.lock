@@ -2449,7 +2449,19 @@ dependencies = [
 name = "crate_test"
 version = "0.1.0"
 dependencies = [
+ "broker_client",
+ "broker_protocol",
+ "bytes",
  "core_types",
+ "crossbeam-channel",
+ "dashmap",
+ "game_message",
+ "game_sockets",
+ "indexmap",
+ "nohash-hasher",
+ "rustc-hash 2.1.2",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
