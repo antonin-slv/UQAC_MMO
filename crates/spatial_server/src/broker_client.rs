@@ -9,7 +9,7 @@ use core_types::{Rect, Vec2};
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, PersonalSnapshot};
 use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, Heartbeat, SpawnClientMsg};
 use game_message::msg_entities::NetComponent;
-use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::GameMessageHeaders;
 use rand::random_range;
 use std::env;
@@ -243,16 +243,6 @@ impl BrokerClient {
         }
 
         false
-    }
-
-    pub fn spawn_new_dgs(&self, server_count: usize) {
-        let message = SpawnServerMSG {
-            server_count: server_count as u8,
-        };
-        self.broker_api.publish_reliable(
-            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build(),
-            &message,
-        );
     }
 
     async fn on_server_connected(
