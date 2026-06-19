@@ -44,10 +44,9 @@ impl ShardIdExt for ShardId {
     fn child_index_towards(self, target: ShardId) -> Option<usize> {
         let mut current = target;
 
-        while current > self {
-            let parent_id = (current - 1) / 4;
+        while let Some(parent_id) = current.parent() {
             if parent_id == self {
-                return Some(((current - 1) % 4) as usize);
+                return current.child_index();
             }
             current = parent_id;
         }
@@ -354,14 +353,14 @@ impl QuadTree {
         }
     }
 
-    fn generate_sub_shards(&mut self) -> Vec<(ShardId, Rect)> {
+    fn generate_sub_shards(&mut self) -> [(ShardId, Rect); 4] {
         let sub_bounds = self.bounds.split();
-        let mut shard_ids = Vec::new();
-        for i in 0..4 {
-            let child_id = self.shard_id.child(i);
-            shard_ids.push((child_id, sub_bounds[i as usize]));
-        }
-        shard_ids
+        [
+            (self.shard_id.child(0), sub_bounds[0]),
+            (self.shard_id.child(1), sub_bounds[1]),
+            (self.shard_id.child(2), sub_bounds[2]),
+            (self.shard_id.child(3), sub_bounds[3]),
+        ]
     }
 
     pub fn get_shard_bounds(&self, shard_id: &ShardId) -> Option<(Rect, bool)> {

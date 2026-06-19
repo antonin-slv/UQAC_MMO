@@ -21,7 +21,6 @@ pub struct Shard {
     pub dgs: Option<NodeId>,
     pub entities: HashSet<Entity>,
     pub state: ShardState,
-    pub parent_id: Option<ShardId>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +111,6 @@ impl ShardManager {
                     entities: HashSet::new(),
                     dgs: Some(new_dgs_id),
                     state: ShardState::PendingReady,
-                    parent_id: parent,
                 },
             );
         } else {
@@ -127,7 +125,6 @@ impl ShardManager {
                     entities: HashSet::new(),
                     dgs: None,
                     state: ShardState::PendingReady,
-                    parent_id: parent,
                 },
             );
         }
@@ -180,7 +177,6 @@ impl ShardManager {
                 entities: HashSet::new(),
                 dgs: Some(promoted_dgs.clone()),
                 state: ShardState::PendingReady,
-                parent_id: parent_id.parent(),
             },
         );
         self.active_dgs
@@ -243,12 +239,11 @@ impl ShardManager {
             );
 
             // Vérification de la complétion du merge pour le parent
-            if let Some(parent_id) = child_shard.parent_id {
-                let still_has_children = self.pending_merges.keys().any(|id| {
-                    self.shards
-                        .get(id)
-                        .is_some_and(|s| s.parent_id == Some(parent_id))
-                });
+            if let Some(parent_id) = child_id.parent() {
+                let still_has_children = self
+                    .pending_merges
+                    .keys()
+                    .any(|id| id.parent() == Some(parent_id));
 
                 if !still_has_children {
                     if let Some(parent_shard) = self.shards.get_mut(&parent_id) {
@@ -352,7 +347,7 @@ impl ShardManager {
                 && shard.state != ShardState::PendingDestroy
         }) {
             shard.dgs = Some(dgs_id.clone());
-            waiting_shard_info = Some((shard_id, shard.parent_id));
+            waiting_shard_info = Some((shard_id, shard_id.parent()));
         }
 
         if let Some((shard_id, parent_id)) = waiting_shard_info {
@@ -419,7 +414,6 @@ impl ShardManager {
                     entities,
                     state: ShardState::Active,
                     dgs: None,
-                    parent_id: None,
                 },
             );
         }
@@ -447,30 +441,23 @@ impl ShardManager {
     }
 
     pub fn get_dgs_for_position(&self, position: Vec2, quad_tree: &QuadTree) -> Option<NodeId> {
-        for (&child_id, rect) in self.pending_merges.iter() {
-            if rect.contains(position) {
-                if let Some(shard) = self.shards.get(&child_id) {
-                    return shard.dgs;
-                }
-            }
-        }
-
         if let Some(shard_id) = quad_tree.get_shard_of_point(position) {
             let mut current_shard_id = shard_id;
-
             while let Some(shard) = self.shards.get(&current_shard_id) {
                 if shard.state == ShardState::PendingReady {
-                    if let Some(parent) = shard.parent_id {
-                        if let Some(parent_shard) = self.shards.get(&parent) {
-                            if parent_shard.dgs.is_some() {
-                                current_shard_id = parent;
-                                continue;
-                            }
-                        }
+                    if shard.dgs.is_some() {
+                        return shard.dgs.clone();
+                    }
+                    // pas encore de server => on remonte
+                    if let Some(parent_id) = current_shard_id.parent() {
+                        current_shard_id = parent_id;
+                        continue;
                     }
                 }
 
-                return shard.dgs;
+                if shard.dgs.is_some() {
+                    return shard.dgs.clone();
+                }
             }
         }
 
