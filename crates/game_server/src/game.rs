@@ -1,4 +1,6 @@
-use crate::dgs_entity_functions::{spawn_entity, Authority, EntityTypeComponent, InputComponent};
+use crate::dgs_entity_functions::{
+    spawn_entity, Authority, EntityTypeComponent, InputComponent, NetworkIdComponent,
+};
 use crate::dgs_network::BrockerManager;
 use crate::dgs_network::NetworkIdGenerator;
 use crate::events;
@@ -116,12 +118,13 @@ fn handle_disconnected(
 
 fn update_inputs(
     mut ev_input: MessageReader<events::PlayerInputEvent>,
-    mut query: Query<&mut InputComponent>,
-    mut client_directory: ResMut<ClientDirectory>,
+    mut query: Query<Option<&mut InputComponent>, With<NetworkIdComponent>>,
+    client_directory: Res<ClientDirectory>,
     entity_directory: ResMut<EntityDirectory>,
     mut broker: ResMut<BrockerManager>,
 ) {
     let header = format!("[GameServer][{:?}][UpdateInput] ", broker.client.node_id);
+    let mut message;
     for ev in ev_input.read() {
         if let Some(possible_player_entities) = client_directory.sessions.get(&ev.client_id) {
             if let Some(_) = possible_player_entities
@@ -129,32 +132,33 @@ fn update_inputs(
                 .find(|net_id| *net_id == &ev.entity_id)
             {
                 if let Some(entity) = entity_directory.entities.get(&ev.entity_id) {
-                    if let Ok(mut inputs) = query.get_mut(*entity) {
-                        let mutable_inputs = inputs.as_mut();
-                        mutable_inputs
-                            .input_buffer
-                            .recv_other(ev.input_data.clone());
-                        continue;
-                    } else {
-                        if broker.not_found_count <= 4 {
-                            println!("{}{} not found in ecs", header, ev.entity_id);
+                    if let Ok(inputs) = query.get_mut(*entity) {
+                        if let Some(mut inputs) = inputs {
+                            let mutable_inputs = inputs.as_mut();
+                            mutable_inputs
+                                .input_buffer
+                                .recv_other(ev.input_data.clone());
+                            continue;
+                        } else {
+                            message = format!("{} {} had no Input component", header, ev.entity_id);
                         }
-                        broker.not_found_count +=1;
-
+                    } else {
+                        message = format!("{} {} not found in ecs", header, ev.entity_id);
                     }
                 } else {
-                    println!("{}not found netID->Entity map", header);
+                    message = format!(
+                        "{} {} key not found netID->Entity map",
+                        ev.entity_id, header
+                    );
                 }
             } else {
-                println!("{}not found in player's entities", header);
+                message = format!("{} {}not found in player's entities", header, ev.entity_id);
             }
         } else {
-            if broker.not_found_count <= 4{
-                println!("{}player {} has no entity", header, ev.client_id);
-            }
-            broker.not_found_count +=1;
-
+            message = format!("{}player {} has no entity", header, ev.client_id);
         }
+        println!("{}", message);
+        broker.not_found_count += 1;
     }
 }
 

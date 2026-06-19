@@ -8,7 +8,7 @@ use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use dotenv::dotenv;
 use game_message::GameMessageHeaders;
-use game_message::msg_dgs::{Heartbeat, HeartbeatMessage};
+use game_message::msg_dgs::{Heartbeat};
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
 use not_games::redis_manager::{GameServer, RedisManager};
 use std::env;
@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                available_server.retain(|s| s.chunk_managed == 0);
+                available_server.retain(|s| s.nb_chunk == 0);
 
                 while available_server.len() > hot_servers_min as usize {
                     if let Some(server) = available_server.first() {
@@ -206,10 +206,10 @@ async fn listen_broker(
             } => {
                 match payload.header {
                     GameMessageHeaders::Heartbeat => {
-                        let heartbeat = payload.extract::<HeartbeatMessage>();
+                        let heartbeat = payload.extract::<Heartbeat>();
                         match heartbeat {
                             Ok(heartbeat) => {
-                                on_heartbeat_received(redis, heartbeat.heartbeat).await?;
+                                on_heartbeat_received(redis, heartbeat).await?;
                             }
                             Err(e) => {
                                 println!("[Orchestrator] Heartbeat error: {}", e);
@@ -252,7 +252,8 @@ async fn on_heartbeat_received(redis: &RedisManager, heartbeat: Heartbeat) -> Re
     match server {
         Ok(server) => {
             if let Some(mut server) = server {
-                server.chunk_managed = heartbeat.chunk_managed.len();
+                server.nb_chunk = heartbeat.chunk_managed.len();
+                server.in_use = heartbeat.is_in_use;
                 redis.update_server(&server).await?;
             } else {
                 eprintln!("Euh michel on reçoit un heartbeat mais il est pas à nous celui là");

@@ -6,10 +6,12 @@ use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::chunks::GameChunk;
+use core_types::helpers::FastSet;
 use events::{ChunkHandOffMessage, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_message::msg_client_server::*;
 use game_message::msg_dgs::{
-    ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
+    ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, SpawnClientMsg,
 };
 use game_message::msg_entities::NetworkEntityId;
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
@@ -56,12 +58,13 @@ pub struct ServerStats {
     zone: String,
     uuid: uuid::Uuid,
     server_broker_id: u32,
+    pub is_in_use : bool,
 }
 
 #[derive(Resource)]
 pub struct BrockerManager {
     pub client: MmoNetworkClient,
-    pub not_found_count : u8
+    pub not_found_count: u8,
 }
 #[derive(Resource)]
 pub struct HeartBeatTimer {
@@ -176,6 +179,7 @@ impl Plugin for NetworkPlugin {
                 external_port: listen_port,
                 uuid: server_uuid,
                 server_broker_id: 0, // Initialisé à 0, sera mis à jour après le handshake
+                is_in_use: false,
             });
 
         app.add_message::<PlayerConnected>()
@@ -190,7 +194,23 @@ impl Plugin for NetworkPlugin {
         println!("\n[Server] Network plugin initialized.\n");
     }
 }
+pub fn send_heartbeat(
+    server_info: &ServerStats,
+    broker: &MmoNetworkClient,
+    managed_chunks: &FastSet<GameChunk>,
+) {
+    let heartbeat = Heartbeat {
+        id: server_info.uuid.to_string(),
+        node_id: broker.node_id.unwrap_or(0),
+        chunk_managed: managed_chunks.clone(),
+        is_in_use: server_info.is_in_use,
+    };
 
+
+    let topic_heartbeat =
+        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
+    broker.publish_reliable(topic_heartbeat, &heartbeat);
+}
 fn send_heartbeat_system(
     time: Res<Time>,
     broker: ResMut<BrockerManager>,
@@ -201,17 +221,11 @@ fn send_heartbeat_system(
     timer.timer.tick(time.delta());
 
     if timer.timer.just_finished() {
-        let heartbeat = Heartbeat {
-            id: server_info.uuid.to_string(),
-            node_id: broker.client.node_id.unwrap_or(0),
-            chunk_managed: managed_chunks.assigned_chunks.clone(),
-        };
-
-        let heartbeat = HeartbeatMessage { heartbeat };
-
-        let topic_heartbeat =
-            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-        broker.client.publish_reliable(topic_heartbeat, &heartbeat);
+        send_heartbeat(
+            server_info.as_ref(),
+            &broker.as_ref().client,
+            &managed_chunks.as_ref().assigned_chunks,
+        );
     }
 }
 
@@ -260,6 +274,8 @@ fn network_bridge_system(
                 let client_auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientAuth).build();
                 broker_connect.subscribe(client_auth_topic, 0);
+
+                send_heartbeat(server_info.as_ref(), broker_connect, &FastSet::default());
             }
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");

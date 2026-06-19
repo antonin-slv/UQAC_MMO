@@ -6,11 +6,11 @@ use broker_protocol::topic_patterns::TopicPattern;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
-use game_message::GameMessageHeaders;
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, PersonalSnapshot};
-use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
+use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, Heartbeat, SpawnClientMsg};
 use game_message::msg_entities::NetComponent;
 use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::GameMessageHeaders;
 use rand::random_range;
 use std::env;
 
@@ -198,16 +198,12 @@ impl BrokerClient {
                                 }
                             }
                         }
-                        GameMessageHeaders::Heartbeat => {
-                            match payload.extract::<HeartbeatMessage>() {
-                                Ok(heartbeat) => shard_manager.on_heartbeat_receive(
-                                    heartbeat.heartbeat,
-                                    quad_tree,
-                                    self,
-                                ),
-                                Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                        GameMessageHeaders::Heartbeat => match payload.extract::<Heartbeat>() {
+                            Ok(heartbeat) => {
+                                shard_manager.on_heartbeat_receive(heartbeat, quad_tree, self)
                             }
-                        }
+                            Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                        },
                         GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>()
                         {
                             Ok(snapshot) => {

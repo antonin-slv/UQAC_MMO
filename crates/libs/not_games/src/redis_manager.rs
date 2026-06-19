@@ -8,18 +8,20 @@ use std::env;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameServer {
     pub id: String,
-    pub address: String,
+    pub ip: String,
     pub port: u16,
-    pub chunk_managed: usize,
+    pub nb_chunk: usize,
+    pub in_use: bool
 }
 
 impl GameServer {
     pub fn new(id: String, port: u16) -> Self {
         Self {
             id,
-            address: env::var("HOST_ADDRESS").expect("Env HOST_ADDRESS is not set"),
+            ip: env::var("HOST_ADDRESS").expect("Env HOST_ADDRESS is not set"),
             port,
-            chunk_managed: 0,
+            nb_chunk: 0,
+            in_use: false,
         }
     }
 }
@@ -92,7 +94,7 @@ impl RedisManager {
     pub async fn get_available_servers(&self) -> Result<Vec<GameServer>> {
         let mut servers = self.get_all_servers().await?;
 
-        servers.retain(|server| server.chunk_managed == 0);
+        servers.retain(|server| server.nb_chunk == 0 && !server.in_use);
 
         Ok(servers)
     }

@@ -32,15 +32,12 @@ impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
 pub struct Heartbeat {
     pub id: String,
     pub node_id: NodeId,
-    pub chunk_managed: FastSet<GameChunk>
+    pub chunk_managed: FastSet<GameChunk>,
+    pub is_in_use : bool,
 }
 
-#[derive(Debug, Decode, Encode, Clone)]
-pub struct HeartbeatMessage {
-    pub heartbeat: Heartbeat,
-}
-impl_bitcode_encode_decode!(HeartbeatMessage);
-impl_game_message!(HeartbeatMessage, GameMessageHeaders::Heartbeat);
+impl_bitcode_encode_decode!(Heartbeat);
+impl_game_message!(Heartbeat, GameMessageHeaders::Heartbeat);
 
 pub struct SpawnClientMsg {
     pub client_id: NodeId,
