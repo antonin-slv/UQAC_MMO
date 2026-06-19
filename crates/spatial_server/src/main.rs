@@ -6,6 +6,7 @@ use crate::shard_manager::ShardManager;
 use anyhow::Result;
 use dotenv::dotenv;
 use std::env;
+#[cfg(feature = "debug_visual")]
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -27,6 +28,7 @@ async fn main() -> Result<()> {
 
     let (quadtree_tx, mut quadtree_rx) = mpsc::channel::<QuadTreeCommand>(4096);
 
+    #[cfg(feature = "debug_visual")]
     let (bevy_tx, bevy_rx) = std::sync::mpsc::channel::<(QuadTree, ShardManager)>();
 
     let quad_tree_handle = tokio::spawn(async move {

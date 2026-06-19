@@ -227,10 +227,8 @@ impl BrokerClient {
                         {
                             Ok(handoff) => {
                                 if handoff.action == ChunkHandOffAction::AeraTook {
-                                    for (rect, new_id) in handoff.areas {
-                                        if let Some(new_id) = new_id {
-                                            shard_manager.on_area_took(new_id, rect, &quad_tree);
-                                        }
+                                    for (rect, old_id) in handoff.areas {
+                                        shard_manager.on_area_took(old_id, rect, &quad_tree);
                                     }
                                 }
                             }

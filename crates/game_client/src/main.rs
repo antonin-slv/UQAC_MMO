@@ -4,7 +4,7 @@ mod structs;
 pub mod client_helper;
 
 use crate::launcher::LauncherPlugin;
-use crate::structs::{Chunking, ClientState, LocalPlayer};
+use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
 use bevy::prelude::*;
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use game_message::msg_client_server::{InputBuffer, PlayerInputMsg, PlayerInput};
@@ -36,7 +36,7 @@ fn main() {
             FixedUpdate,
             capture_inputs.run_if(in_state(ClientState::InGame)),
         )
-        .add_systems(Update, draw_chunks)
+        .add_systems(Update, (camera_follow_player, draw_chunks))
         .run();
     //todo : tenter d'envoyer un message de déconnexion (permettra d'un peu limiter la charge serveur) -> soit event soit à la fin de run.
 }
@@ -46,6 +46,18 @@ fn setup_graphics(mut commands: Commands) {
         position: Transform::from_xyz(0.0, 50.0, 50.0).looking_at(Vec3::ZERO, Vec3::Y),
         camera: Camera2d::default(),
     });
+}
+
+fn camera_follow_player(
+    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<LocalControlledComponent>)>,
+    player_query: Query<&Transform, With<LocalControlledComponent>>,
+) {
+    if let Ok(player_transform) = player_query.single() {
+        if let Ok(mut camera_transform) = camera_query.single_mut() {
+            camera_transform.translation.x = player_transform.translation.x;
+            camera_transform.translation.y = player_transform.translation.y;
+        }
+    }
 }
 
 fn capture_inputs(
@@ -107,7 +119,7 @@ fn draw_chunks(mut gizmos: Gizmos, chunking: Res<Chunking>) {
     // Dessine une grille de 20x20 chunks, centrée sur l'origine du monde (0,0)
     gizmos.grid_2d(
         Isometry2d::IDENTITY,
-        UVec2::new(20, 20),               // Résolution : 20 colonnes, 20 lignes
+        UVec2::new(8, 8),               // Résolution : 20 colonnes, 20 lignes
         Vec2::splat(chunking.chunk_size), // Taille physique de chaque cellule
         Color::Srgba(Srgba::RED),
     );

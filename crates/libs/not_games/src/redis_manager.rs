@@ -94,7 +94,7 @@ impl RedisManager {
     pub async fn get_available_servers(&self) -> Result<Vec<GameServer>> {
         let mut servers = self.get_all_servers().await?;
 
-        servers.retain(|server| server.nb_chunk == 0 && !server.in_use);
+        servers.retain(|server| !server.in_use);
 
         Ok(servers)
     }

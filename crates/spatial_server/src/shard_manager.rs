@@ -186,11 +186,16 @@ impl ShardManager {
             );
         }
     }
-
-    pub fn on_area_took(&mut self, dgs_id: NodeId, bounds: Rect, quad_tree: &QuadTree) {
+    pub fn on_area_took(
+        &mut self,
+        stolen_dgs: Option<NodeId>,
+        bounds_of_area: Rect,
+        quad_tree: &QuadTree,
+    ) {
+        // gestion du merge.
         let mut merged_child_id = None;
         for (&child_id, &rect) in self.pending_merges.iter() {
-            if rect == bounds {
+            if rect == bounds_of_area {
                 merged_child_id = Some(child_id);
                 break;
             }
@@ -206,7 +211,7 @@ impl ShardManager {
 
                 println!(
                     "✅ [Merge] Sous-zone {:?} absorbée. Serveur enfant libéré.",
-                    bounds
+                    bounds_of_area
                 );
 
                 if let Some(parent_id) = child_shard.parent_id {
@@ -229,13 +234,13 @@ impl ShardManager {
             }
             return;
         }
-
+        //gestion du split
         let mut target_shard_id = None;
 
         for (&shard_id, shard) in self.shards.iter() {
-            if shard.dgs == Some(dgs_id.clone()) {
+            if shard.state == ShardState::PendingReady {
                 if let Some((shard_bounds, _)) = quad_tree.get_shard_bounds(&shard_id) {
-                    if shard_bounds == bounds {
+                    if shard_bounds == bounds_of_area {
                         target_shard_id = Some(shard_id);
                         break;
                     }
@@ -251,8 +256,8 @@ impl ShardManager {
                     child_shard.state = ShardState::Active;
                     parent_id_to_check = child_shard.parent_id;
                     println!(
-                        "✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {} !",
-                        bounds, dgs_id
+                        "✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {:?} !",
+                        bounds_of_area, stolen_dgs
                     );
                 }
             }
@@ -265,13 +270,17 @@ impl ShardManager {
                         "🎉 [Handoff] Toutes les sous-zones du parent {} ont confirmé (AreaTook). Destruction du parent.",
                         parent_id
                     );
-                    self.shards.remove(&parent_id);
+                    if let Some(parent_shard) = self.shards.remove(&parent_id) {
+                        if let Some(parent_dgs) = parent_shard.dgs {
+                            self.active_dgs.insert(parent_dgs, None);
+                        }
+                    }
                 }
             }
         } else {
             eprintln!(
-                "⚠️ [Handoff] AreaTook reçu du DGS {}, mais aucun shard en attente trouvé pour les bounds {:?}",
-                dgs_id, bounds
+                "⚠️ [Handoff] AreaTook reçu du DGS {:?}, mais aucun shard en attente trouvé pour les bounds {:?}",
+                stolen_dgs, bounds_of_area
             );
         }
     }

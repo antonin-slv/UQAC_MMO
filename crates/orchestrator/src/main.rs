@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                available_server.retain(|s| s.nb_chunk == 0);
+                available_server.retain(|s| !s.in_use );
 
                 while available_server.len() > hot_servers_min as usize {
                     if let Some(server) = available_server.first() {

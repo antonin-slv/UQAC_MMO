@@ -1,7 +1,9 @@
 // server/src/network.rs
 
 use crate::events;
-use crate::events::{AssignedChunks, ChunkTransferEvent, EntityTransferEvent, SnapshotReceived};
+use crate::events::{
+    AssignedChunks, EntityTransferEvent, InwardChunkTransferEvent, SnapshotReceived,
+};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
@@ -58,7 +60,7 @@ pub struct ServerStats {
     zone: String,
     uuid: uuid::Uuid,
     server_broker_id: u32,
-    pub is_in_use : bool,
+    pub is_in_use: bool,
 }
 
 #[derive(Resource)]
@@ -202,10 +204,9 @@ pub fn send_heartbeat(
     let heartbeat = Heartbeat {
         id: server_info.uuid.to_string(),
         node_id: broker.node_id.unwrap_or(0),
-        chunk_managed: managed_chunks.clone(),
+        chunk_managed: Default::default(),
         is_in_use: server_info.is_in_use,
     };
-
 
     let topic_heartbeat =
         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
@@ -237,7 +238,7 @@ fn network_bridge_system(
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
     mut msg_chunk_assigned: MessageWriter<ChunkHandOffMessage>,
-    mut msg_state_transfer: MessageWriter<ChunkTransferEvent>,
+    mut msg_state_transfer: MessageWriter<InwardChunkTransferEvent>,
     mut msg_entity_transfer: MessageWriter<EntityTransferEvent>,
     mut msg_snapshot: MessageWriter<SnapshotReceived>,
 ) {
@@ -322,7 +323,7 @@ fn route_message_events(
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
     msg_chunk_assigned: &mut MessageWriter<ChunkHandOffMessage>,
-    msg_chunk_state_transfer: &mut MessageWriter<ChunkTransferEvent>,
+    msg_chunk_state_transfer: &mut MessageWriter<InwardChunkTransferEvent>,
     msg_entity_transfer: &mut MessageWriter<EntityTransferEvent>,
     msg_snapshot: &mut MessageWriter<SnapshotReceived>,
 ) {
@@ -369,7 +370,7 @@ fn route_message_events(
 
         GameMessageHeaders::ChunkDataHandOff => match payload.extract::<ChunkDataHandOff>() {
             Ok(msg) => {
-                msg_chunk_state_transfer.write(ChunkTransferEvent { message: msg });
+                msg_chunk_state_transfer.write(InwardChunkTransferEvent { message: msg });
             }
             Err(e) => {
                 println!("[Server] Parsing Error EntityStateTransferHandoff : {}", e);

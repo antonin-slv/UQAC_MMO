@@ -35,7 +35,7 @@ pub struct ChunkHandOffMessage {
 }
 
 #[derive(Message)]
-pub struct ChunkTransferEvent {
+pub struct InwardChunkTransferEvent {
     pub message: ChunkDataHandOff,
 }
 

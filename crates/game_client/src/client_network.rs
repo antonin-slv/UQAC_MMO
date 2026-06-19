@@ -1,6 +1,6 @@
 ﻿use crate::client_helper::{insert_net_component, update_net_component};
 use crate::structs::{Chunking, ClientState, LocalControlledComponent, LocalPlayer};
-use crate::RootBundle;
+use crate::{CameraBundle, RootBundle};
 use bevy::app::{App, Plugin, PreUpdate, Update};
 use bevy::asset::Assets;
 use bevy::color::Color;

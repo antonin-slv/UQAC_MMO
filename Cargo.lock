@@ -4565,18 +4565,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mock_spatial_auth_server"
-version = "0.1.0"
-dependencies = [
- "broker_client",
- "broker_protocol",
- "core_types",
- "dotenv",
- "game_message",
- "tokio",
-]
-
-[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

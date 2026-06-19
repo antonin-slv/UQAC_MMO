@@ -2,10 +2,10 @@
     spawn_or_update_entity, Authority, ControlledBy, EntityTypeComponent, InputComponent,
     NetworkIdComponent,
 };
-use crate::dgs_network::{BrockerManager, ServerStats};
+use crate::dgs_network::{send_heartbeat, BrockerManager, ServerStats};
 use crate::events;
 use crate::events::{
-    AssignedChunks, ChunkTransferEvent, EntityTransferEvent, PendingChunkTransfersForOther,
+    AssignedChunks, EntityTransferEvent, InwardChunkTransferEvent, PendingChunkTransfersForOther,
 };
 use crate::game::{ClientDirectory, EntityDirectory};
 use bevy::app::Plugin;
@@ -46,7 +46,7 @@ impl Plugin for ChunkPlugin {
         .insert_resource(PendingChunkTransfersForOther { aeras: Vec::new() })
         .add_message::<events::SnapshotReceived>()
         .add_message::<events::ChunkHandOffMessage>()
-        .add_message::<ChunkTransferEvent>()
+        .add_message::<InwardChunkTransferEvent>()
         .add_systems(
             FixedPreUpdate,
             (
@@ -160,7 +160,6 @@ fn handle_chunks_handoff_message(
                         "[GameServer][{:?}] Taking {:?} from {:?}",
                         broker.client.node_id, aera, old_owner
                     );
-                    server_stats.as_mut().is_in_use = true;
                     let taken_chunk_aera = aera.bounding_chunk_aera(chunk_directory.chunk_size);
 
                     // 1. SÉPARATION STRICTE : CŒUR vs FRONTIÈRES
@@ -251,17 +250,23 @@ fn handle_chunks_handoff_message(
                             aera, message.origin_aera
                         );
 
-                        let aera_taken = handle_specific_recv_data_handoff_message(
+                        let aera_taken = handle_specific_recv_new_chunk_message(
                             &mut commands,
-                            &mut chunk_directory,
-                            &mut client_directory,
-                            &mut entity_directory,
+                            chunk_directory.as_mut(),
+                            client_directory.as_mut(),
+                            entity_directory.as_mut(),
                             &mut current_in_ecs_entities,
                             &broker,
                             &message,
+                            server_stats.as_mut(),
                         );
 
-                        publish_aera_took(&broker, vec![aera_taken]);
+                        publish_aera_took(
+                            &broker,
+                            vec![aera_taken],
+                            server_stats.as_ref(),
+                            &chunk_directory.assigned_chunks,
+                        );
                     }
                 }
             }
@@ -276,7 +281,7 @@ fn handle_chunks_handoff_message(
 // PHASE 3: On reçoit les entités transférées (Nous sommes le Target)
 //        , à ce niveau, tout les chunks concernés sont déjà en ghost.
 fn handle_chunk_transfer(
-    mut ev_transfer: MessageReader<ChunkTransferEvent>,
+    mut ev_transfer: MessageReader<InwardChunkTransferEvent>,
     mut commands: Commands,
     mut chunk_directory: ResMut<AssignedChunks>,
     mut client_directory: ResMut<ClientDirectory>,
@@ -301,14 +306,15 @@ fn handle_chunk_transfer(
             ev.message.old_owner,
             ev.message.data.len()
         );
-        let aera = handle_specific_recv_data_handoff_message(
+        let aera = handle_specific_recv_new_chunk_message(
             &mut commands,
-            &mut chunk_directory,
-            &mut client_directory,
-            &mut entity_directory,
+            chunk_directory.as_mut(),
+            client_directory.as_mut(),
+            entity_directory.as_mut(),
             &mut current_in_ecs_entities,
             &broker,
             &ev.message,
+            server_stats.as_mut(),
         );
 
         taken_aeras.push(aera);
@@ -316,13 +322,20 @@ fn handle_chunk_transfer(
 
     if !taken_aeras.is_empty() {
         server_stats.as_mut().is_in_use = true;
-        publish_aera_took(broker.as_ref(), taken_aeras);
+        publish_aera_took(
+            broker.as_ref(),
+            taken_aeras,
+            server_stats.as_ref(),
+            &chunk_directory.assigned_chunks,
+        );
     }
 }
 
 fn publish_aera_took(
     broker: &BrockerManager,
     taken_aeras: Vec<(core_types::Rect, Option<NodeId>)>,
+    server_stats: &ServerStats,
+    current_chunks: &FastSet<GameChunk>,
 ) {
     let spatial_server_topic =
         TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer).build();
@@ -334,11 +347,13 @@ fn publish_aera_took(
     broker
         .client
         .publish_reliable(spatial_server_topic, &handoff_complete_message);
+
+    send_heartbeat(server_stats, &broker.client, current_chunks);
 }
 
 // !!! YOU MUST CALL publish_aeraa_took after this !!!
 #[must_use]
-fn handle_specific_recv_data_handoff_message(
+fn handle_specific_recv_new_chunk_message(
     mut commands: &mut Commands,
     chunk_directory: &mut AssignedChunks,
     mut client_directory: &mut ClientDirectory,
@@ -349,7 +364,9 @@ fn handle_specific_recv_data_handoff_message(
     >,
     broker: &ResMut<BrockerManager>,
     message: &ChunkDataHandOff,
+    server_stats: &mut ServerStats,
 ) -> (core_types::Rect, Option<NodeId>) {
+    server_stats.is_in_use = true;
     let orgin_aera: GameChunkAera = message.origin_aera;
 
     if message.old_owner.is_some() {

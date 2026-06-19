@@ -8,7 +8,6 @@ members = [
     "crates/libs/game_sockets",
     "crates/spatial_server",
     "crates/broker",
-    "crates/mock_spatial_auth_server",
     "crates/libs/broker_client",
     "crates/libs/not_games",
     "crates/libs/core_types",
