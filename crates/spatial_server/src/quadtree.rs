@@ -1,5 +1,5 @@
 use crate::broker_client::BrokerClient;
-use crate::shard_manager::ShardManager;
+use crate::shard_manager::{ShardManager, ShardState};
 use core_types::{Rect, Vec2};
 use game_message::msg_entities::NetworkEntityId;
 use std::collections::HashMap;
@@ -274,21 +274,49 @@ impl QuadTree {
         let entity_count = self.count_entities(shard_manager);
 
         if self.children.is_some() {
-            if entity_count < self.merge_threshold && self.depth > 0 {
-                let destroyed = self.merge(shard_manager);
-                if !destroyed.is_empty() {
-                    merges.insert(self.shard_id, destroyed);
-                }
-            } else {
-                if let Some(children) = self.children.as_mut() {
-                    for child in children.iter_mut() {
-                        let child_merges = child.try_merge(shard_manager);
-                        merges.extend(child_merges);
+            if entity_count < self.merge_threshold && self.shard_id != 0 {
+                if self.is_branch_stable(shard_manager) {
+                    let destroyed = self.merge(shard_manager);
+                    if !destroyed.is_empty() {
+                        merges.insert(self.shard_id, destroyed);
                     }
+                    // Si on a fusionné, on s'arrête ici pour cette branche.
+                    return merges;
+                }
+            }
+
+            if let Some(children) = self.children.as_mut() {
+                for child in children.iter_mut() {
+                    let child_merges = child.try_merge(shard_manager);
+                    let mut merged = vec![];
+                    for (_, child_merge) in child_merges {
+                        merged.extend(child_merge);
+                    }
+                    merges.insert(self.shard_id, merged);
                 }
             }
         }
         merges
+    }
+
+    fn is_branch_stable(&self, shard_manager: &ShardManager) -> bool {
+        // On vérifie l'état de ce nœud-ci
+        if let Some(shard) = shard_manager.shards.get(&self.shard_id) {
+            if shard.state != ShardState::Active {
+                return false; // Ce nœud est en transition, on bloque tout !
+            }
+        }
+
+        // On vérifie récursivement les enfants
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                if !child.is_branch_stable(shard_manager) {
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 
     fn count_entities(&self, shard_manager: &mut ShardManager) -> usize {
