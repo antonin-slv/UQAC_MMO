@@ -82,13 +82,17 @@ impl ShardManager {
         let mut current_ancestor = parent;
         while let Some(ancestor_id) = current_ancestor {
             if let Some(ancestor_shard) = self.shards.get_mut(&ancestor_id) {
+                ancestor_shard.state = ShardState::PendingSplit;
                 if ancestor_shard.dgs.is_some() {
                     old_dgs_id = ancestor_shard.dgs.clone();
-                    ancestor_shard.state = ShardState::PendingSplit;
                     break; // On a trouvé le DGS légitime, on s'arrête
                 }
             }
             current_ancestor = ancestor_id.parent();
+        }
+
+        if old_dgs_id.is_none() {
+            println!("SpatialServer : New Shard Spawned but no DGS ancestor found")
         }
 
         if let Some((new_dgs, shard_assignment)) = self
@@ -186,7 +190,6 @@ impl ShardManager {
         let mut areas_to_take = Vec::new();
 
         for (child_id, child_bounds) in real_dgs_children {
-            // Peut contenir 3, 15 ou 63 zones !
             if let Some(child_shard) = self.shards.get_mut(&child_id) {
                 child_shard.state = ShardState::PendingDestroy;
                 areas_to_take.push((child_bounds.clone(), child_shard.dgs.clone()));
@@ -203,7 +206,6 @@ impl ShardManager {
             );
             broker.assign_shard_to_dgs(promoted_dgs, areas_to_take);
         } else {
-            // Cas très rare où le parent n'avait qu'un seul enfant valide
             if let Some(parent_shard) = self.shards.get_mut(&parent_id) {
                 parent_shard.state = ShardState::Active;
             }
@@ -215,89 +217,96 @@ impl ShardManager {
         bounds_of_area: Rect,
         quad_tree: &QuadTree,
     ) {
-        // gestion du merge.
-        let mut merged_child_id = None;
-        for (&child_id, &rect) in self.pending_merges.iter() {
-            if rect == bounds_of_area {
-                merged_child_id = Some(child_id);
-                break;
-            }
-        }
+        let merged_child_id = self
+            .pending_merges
+            .iter()
+            .find_map(|(&id, &rect)| (rect == bounds_of_area).then_some(id));
 
         if let Some(child_id) = merged_child_id {
-            self.pending_merges.remove(&child_id);
+            self.handle_merge_area_took(child_id, bounds_of_area);
+        } else {
+            self.handle_split_area_took(stolen_dgs, bounds_of_area, quad_tree);
+        }
+    }
 
-            if let Some(child_shard) = self.shards.remove(&child_id) {
-                if let Some(child_dgs) = child_shard.dgs {
-                    self.active_dgs.insert(child_dgs, None);
-                }
+    fn handle_merge_area_took(&mut self, child_id: ShardId, bounds_of_area: Rect) {
+        self.pending_merges.remove(&child_id);
 
-                println!(
-                    "✅ [Merge] Sous-zone {:?} absorbée. Serveur enfant libéré.",
-                    bounds_of_area
-                );
+        if let Some(child_shard) = self.shards.remove(&child_id) {
+            if let Some(child_dgs) = child_shard.dgs {
+                self.active_dgs.insert(child_dgs, None); // Libération du serveur enfant
+            }
 
-                if let Some(parent_id) = child_shard.parent_id {
-                    let still_has_children = self.pending_merges.keys().any(|&id| {
-                        self.shards
-                            .get(&id)
-                            .map_or(false, |s| s.parent_id == Some(parent_id))
-                    });
+            println!(
+                "✅ [Merge] Sous-zone {:?} absorbée. Serveur enfant libéré.",
+                bounds_of_area
+            );
 
-                    if !still_has_children {
-                        if let Some(parent_shard) = self.shards.get_mut(&parent_id) {
-                            parent_shard.state = ShardState::Active;
-                            println!(
-                                "🎉 [Merge] Téléchargement total réussi ! Parent {} Actif.",
-                                parent_id
-                            );
-                        }
+            // Vérification de la complétion du merge pour le parent
+            if let Some(parent_id) = child_shard.parent_id {
+                let still_has_children = self.pending_merges.keys().any(|id| {
+                    self.shards
+                        .get(id)
+                        .is_some_and(|s| s.parent_id == Some(parent_id))
+                });
+
+                if !still_has_children {
+                    if let Some(parent_shard) = self.shards.get_mut(&parent_id) {
+                        parent_shard.state = ShardState::Active;
+                        println!(
+                            "🎉 [Merge] Téléchargement total réussi ! Parent {} Actif.",
+                            parent_id
+                        );
                     }
                 }
             }
-            return;
         }
-        //gestion du split
-        let mut target_shard_id = None;
+    }
 
-        for (&shard_id, shard) in self.shards.iter() {
+    fn handle_split_area_took(
+        &mut self,
+        stolen_dgs: Option<NodeId>,
+        bounds_of_area: Rect,
+        quad_tree: &QuadTree,
+    ) {
+        // On cherche le nouveau shard en attente qui correspond à cette zone
+        let target_shard_id = self.shards.iter().find_map(|(&shard_id, shard)| {
             if shard.state == ShardState::PendingReady {
                 if let Some((shard_bounds, _)) = quad_tree.get_shard_bounds(&shard_id) {
                     if shard_bounds == bounds_of_area {
-                        target_shard_id = Some(shard_id);
-                        break;
+                        return Some(shard_id);
                     }
                 }
             }
-        }
+            None
+        });
 
         if let Some(child_shard_id) = target_shard_id {
-            let mut parent_id_to_check = None;
-
+            // On active l'enfant et on récupère l'ID du parent
             if let Some(child_shard) = self.shards.get_mut(&child_shard_id) {
-                if child_shard.state == ShardState::PendingReady {
-                    child_shard.state = ShardState::Active;
-                    parent_id_to_check = child_shard.parent_id;
-                    println!(
-                        "✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {:?} !",
-                        bounds_of_area, stolen_dgs
-                    );
-                }
+                child_shard.state = ShardState::Active;
+                println!("✅ [Handoff] La sous-zone {:?} est désormais Active sur le DGS {:?} !", bounds_of_area, stolen_dgs);
             }
 
-            if let Some(parent_id) = parent_id_to_check {
-                let is_fully_transferred = self.check_if_parent_fully_transferred(parent_id);
+            let mut current_parent_to_check = child_shard_id.parent();
 
-                if is_fully_transferred {
+            // Remontée en cascade
+            while let Some(parent_id) = current_parent_to_check {
+                if self.check_if_node_fully_transferred(parent_id) {
                     println!(
                         "🎉 [Handoff] Toutes les sous-zones du parent {} ont confirmé (AreaTook). Destruction du parent.",
                         parent_id
                     );
+
+                    // On retire le parent qui a fini son split
                     if let Some(parent_shard) = self.shards.remove(&parent_id) {
                         if let Some(parent_dgs) = parent_shard.dgs {
-                            self.active_dgs.insert(parent_dgs, None);
+                            self.active_dgs.insert(parent_dgs, None); // On libère le serveur
                         }
                     }
+                    current_parent_to_check = parent_id.parent();
+                } else {
+                    break;
                 }
             }
         } else {
@@ -307,31 +316,26 @@ impl ShardManager {
             );
         }
     }
-
-    fn check_if_parent_fully_transferred(&self, parent_id: ShardId) -> bool {
+    fn check_if_node_fully_transferred(&self, parent_id: ShardId) -> bool {
         let mut has_descendants = false;
 
-        for (&shard_id, shard) in self.shards.iter() {
-            let mut is_descendant = false;
-            let mut current = shard_id;
+        let mut stack = vec![parent_id];
 
-            // On remonte l'arbre mathématiquement pour voir si parent_id est un ancêtre
-            while let Some(p) = current.parent() {
-                if p == parent_id {
-                    is_descendant = true;
-                    break;
-                }
-                current = p;
-            }
+        while let Some(current_id) = stack.pop() {
+            for i in 0..4 {
+                let child_id = current_id.child(i);
 
-            if is_descendant {
-                has_descendants = true;
-                // Si le moindre petit-enfant est en attente, le transfert n'est pas fini !
-                if shard.state == ShardState::PendingReady {
-                    return false;
+                if let Some(child_shard) = self.shards.get(&child_id) {
+                    has_descendants = true;
+
+                    if child_shard.state == ShardState::PendingReady {
+                        return false;
+                    }
+                    stack.push(child_id);
                 }
             }
         }
+
         has_descendants
     }
 

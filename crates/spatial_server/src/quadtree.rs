@@ -287,12 +287,7 @@ impl QuadTree {
 
             if let Some(children) = self.children.as_mut() {
                 for child in children.iter_mut() {
-                    let child_merges = child.try_merge(shard_manager);
-                    let mut merged = vec![];
-                    for (_, child_merge) in child_merges {
-                        merged.extend(child_merge);
-                    }
-                    merges.insert(self.shard_id, merged);
+                    merges.extend(child.try_merge(shard_manager));
                 }
             }
         }
