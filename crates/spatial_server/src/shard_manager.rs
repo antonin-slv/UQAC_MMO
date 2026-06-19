@@ -489,7 +489,7 @@ impl ShardManager {
         0
     }
 
-    pub fn get_entities(&self) -> Vec<Entity> {
+    pub fn _get_entities(&self) -> Vec<Entity> {
         let mut entities = Vec::new();
 
         for shard in self.shards.values() {

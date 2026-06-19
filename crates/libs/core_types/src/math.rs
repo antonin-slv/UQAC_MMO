@@ -1,6 +1,5 @@
 use crate::chunks::{GameChunk, GameChunkAera};
 use bitcode::{Decode, Encode};
-use serde::{Deserialize, Serialize};
 use std::ops::MulAssign;
 
 pub mod chunks;

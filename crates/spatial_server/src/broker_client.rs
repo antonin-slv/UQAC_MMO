@@ -348,7 +348,7 @@ impl BrokerClient {
         self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 
-    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn _remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();

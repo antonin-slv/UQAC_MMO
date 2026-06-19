@@ -55,9 +55,6 @@ impl Default for NetworkIdGenerator {
 pub struct ServerStats {
     total_players: usize,
     max_players: usize,
-    external_url: String,
-    external_port: u16,
-    zone: String,
     uuid: uuid::Uuid,
     server_broker_id: u32,
     pub is_in_use: bool,
@@ -174,11 +171,8 @@ impl Plugin for NetworkPlugin {
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
             })
             .insert_resource(ServerStats {
-                zone: "default".to_string(),
                 total_players: 0,
                 max_players,
-                external_url: listen_ip.to_string(),
-                external_port: listen_port,
                 uuid: server_uuid,
                 server_broker_id: 0, // Initialisé à 0, sera mis à jour après le handshake
                 is_in_use: false,
@@ -199,7 +193,7 @@ impl Plugin for NetworkPlugin {
 pub fn send_heartbeat(
     server_info: &ServerStats,
     broker: &MmoNetworkClient,
-    managed_chunks: &FastSet<GameChunk>,
+    _managed_chunks: &FastSet<GameChunk>,
 ) {
     let heartbeat = Heartbeat {
         id: server_info.uuid.to_string(),
