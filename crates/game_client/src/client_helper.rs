@@ -7,7 +7,7 @@ pub struct EntityTypeComponent(pub EntityType);
 
 #[derive(Component)]
 struct InputComponent {
-    input_buffer: InputBuffer
+    _input_buffer: InputBuffer
 }
 
 pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComponent) {
@@ -20,7 +20,7 @@ pub fn insert_net_component(entity_cmds: &mut EntityCommands, net_comp: &NetComp
         }
         NetComponent::Inputs(buffers) => {
             entity_cmds.insert(InputComponent {
-                input_buffer: buffers.clone(),
+                _input_buffer: buffers.clone(),
             });
         }
         NetComponent::Velocity(_vel) => {}

@@ -7,6 +7,7 @@ use bitcode::{Decode, Encode};
 use broker_protocol::broker_message::NodeId;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use core_types::chunks::{GameChunk, GameChunkAera};
+use core_types::helpers::FastSet;
 use core_types::Rect;
 
 #[derive(Decode, Encode, Debug, PartialEq)]
@@ -31,17 +32,12 @@ impl_game_message!(ChunkHandOff, GameMessageHeaders::ChunkHandOff);
 pub struct Heartbeat {
     pub id: String,
     pub node_id: NodeId,
-    pub zone: String,
-    pub player_count: usize,
-    pub max_players: usize,
+    pub chunk_managed: FastSet<GameChunk>,
+    pub is_in_use : bool,
 }
 
-#[derive(Debug, Decode, Encode, Clone)]
-pub struct HeartbeatMessage {
-    pub heartbeat: Heartbeat,
-}
-impl_bitcode_encode_decode!(HeartbeatMessage);
-impl_game_message!(HeartbeatMessage, GameMessageHeaders::Heartbeat);
+impl_bitcode_encode_decode!(Heartbeat);
+impl_game_message!(Heartbeat, GameMessageHeaders::Heartbeat);
 
 pub struct SpawnClientMsg {
     pub client_id: NodeId,

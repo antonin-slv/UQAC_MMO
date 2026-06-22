@@ -7,10 +7,11 @@ use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
 use core_types::chunks::get_chunk_size;
 use core_types::{Rect, Vec2};
 use game_message::msg_client_server::{ClientHelloMsg, ClientWelcomeMsg, PersonalSnapshot};
-use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, HeartbeatMessage, SpawnClientMsg};
+use game_message::msg_dgs::{ChunkHandOff, ChunkHandOffAction, Heartbeat, SpawnClientMsg};
 use game_message::msg_entities::NetComponent;
-use game_message::msg_servers::{ServerHelloMSG, ServerType, SpawnServerMSG};
+use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::GameMessageHeaders;
+use rand::random_range;
 use std::env;
 
 const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
@@ -18,7 +19,6 @@ const BROKER_URL_ENV_NAME: &str = "BROKER_URL";
 pub struct BrokerClient {
     broker_api: MmoNetworkClient,
     chunk_size: f32,
-    max_depth: u8,
     world_size: f32,
 }
 
@@ -66,7 +66,6 @@ impl BrokerClient {
         Self {
             broker_api: broker_client,
             world_size,
-            max_depth,
             chunk_size,
         }
     }
@@ -81,7 +80,6 @@ impl BrokerClient {
                 ClientNetworkEvent::Ready => {
                     println!("[Server] Connection ready");
 
-                    // Auth to broker
                     let msg = ServerHelloMSG {
                         server_type: ServerType::Spatial,
                         id: self.broker_api.node_id.unwrap_or_else(|| {
@@ -112,14 +110,16 @@ impl BrokerClient {
                         0,
                     );
 
+                    self.broker_api.subscribe(auth_topic, 0);
+
                     self.broker_api.subscribe(
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ServerConnection)
-                            .build(),
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build(),
                         0,
                     );
 
                     self.broker_api.subscribe(
-                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build(),
+                        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::SpatialServer)
+                            .build(),
                         0,
                     );
 
@@ -153,8 +153,6 @@ impl BrokerClient {
                             } else {
                                 if removed_node_id.is_server() {
                                     shard_manager.on_dgs_stopped(removed_node_id);
-                                } else if removed_node_id.is_client() {
-                                    shard_manager.on_client_disconnected(removed_node_id);
                                 }
                             }
                         }
@@ -167,84 +165,84 @@ impl BrokerClient {
                     client_id,
                     stream: _,
                     mut payload,
-                } => match payload.header {
-                    GameMessageHeaders::ClientHello => match payload.extract::<ClientHelloMsg>() {
-                        Ok(msg) => {
-                            if let Some(quad_tree) = quad_tree {
-                                self.on_new_client_connected(
-                                    client_id,
-                                    quad_tree,
-                                    shard_manager,
-                                    msg,
-                                )
-                                .await;
-                            }
-                        }
-                        Err(e) => {
-                            println!("⚠️ [Auth] Message ClientHello mal formé : {}", e);
-                        }
-                    },
-                    GameMessageHeaders::FriendHello => match payload.extract::<ServerHelloMSG>() {
-                        Ok(friend) => {
-                            if let Some(quad_tree) = quad_tree {
-                                self.on_server_connected(friend, shard_manager, quad_tree)
+                } => {
+                    let Some(quad_tree) = quad_tree else {
+                        return false;
+                    };
+
+                    match payload.header {
+                        GameMessageHeaders::ClientHello => {
+                            match payload.extract::<ClientHelloMsg>() {
+                                Ok(msg) => {
+                                    self.on_new_client_connected(
+                                        client_id,
+                                        quad_tree,
+                                        shard_manager,
+                                        msg,
+                                    )
                                     .await;
-                            }
-                        }
-                        Err(e) => {
-                            println!("[DGS] DGS Connected error {}", e)
-                        }
-                    },
-                    GameMessageHeaders::Heartbeat => match payload.extract::<HeartbeatMessage>() {
-                        Ok(heartbeat) => {
-                            if let Some(quad_tree) = quad_tree {
-                                shard_manager.on_heartbeat_receive(
-                                    heartbeat.heartbeat.node_id,
-                                    quad_tree,
-                                    self,
-                                )
-                            }
-                        }
-                        Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
-                    },
-                    GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>() {
-                        Ok(snapshot) => {
-                            //println!("[Orchestrator] Snapshot received");
-                            for entity_snapshot in snapshot.entities {
-                                let mut pos = Vec2::new(0.0, 0.0);
-                                for comp in entity_snapshot.updates {
-                                    if let NetComponent::Position(comp_pos) = comp {
-                                        pos = comp_pos;
-                                        break;
-                                    }
                                 }
-                                let entity = Entity::new(entity_snapshot.net_id, pos);
-                                //println!("Entity ID {}", entity_snapshot.network_id);
-                                if let Some(quad_tree) = quad_tree {
+                                Err(e) => {
+                                    println!("⚠️ [Auth] Message ClientHello mal formé : {}", e);
+                                }
+                            }
+                        }
+                        GameMessageHeaders::FriendHello => {
+                            match payload.extract::<ServerHelloMSG>() {
+                                Ok(friend) => {
+                                    self.on_server_connected(friend, shard_manager, quad_tree)
+                                        .await
+                                }
+                                Err(e) => {
+                                    println!("[DGS] DGS Connected error {}", e)
+                                }
+                            }
+                        }
+                        GameMessageHeaders::Heartbeat => match payload.extract::<Heartbeat>() {
+                            Ok(heartbeat) => {
+                                shard_manager.on_heartbeat_receive(heartbeat, quad_tree, self)
+                            }
+                            Err(e) => println!("[Orchestrator] Heartbeat error: {}", e),
+                        },
+                        GameMessageHeaders::Snapshot => match payload.extract::<PersonalSnapshot>()
+                        {
+                            Ok(snapshot) => {
+                                for entity_snapshot in snapshot.entities {
+                                    let mut pos = Vec2::new(0.0, 0.0);
+                                    for comp in entity_snapshot.updates {
+                                        if let NetComponent::Position(comp_pos) = comp {
+                                            pos = comp_pos;
+                                            break;
+                                        }
+                                    }
+                                    let entity = Entity::new(entity_snapshot.net_id, pos);
                                     quad_tree.insert(entity, shard_manager, self);
                                 }
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
-                        }
-                    },
-                    _ => {}
-                },
+                            Err(e) => {
+                                eprintln!("[Client] Erreur de parsing du Snapshot : {}", e);
+                            }
+                        },
+                        GameMessageHeaders::ChunkHandOff => match payload.extract::<ChunkHandOff>()
+                        {
+                            Ok(handoff) => {
+                                if handoff.action == ChunkHandOffAction::AeraTook {
+                                    for (rect, old_id) in handoff.areas {
+                                        shard_manager.on_area_took(old_id, rect, &quad_tree);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[Client] Erreur de parsing du Chunked Off : {}", e);
+                            }
+                        },
+                        _ => {}
+                    }
+                }
             }
         }
 
         false
-    }
-
-    pub fn spawn_new_dgs(&self, server_count: usize) {
-        let message = SpawnServerMSG {
-            server_count: server_count as u8,
-        };
-        self.broker_api.publish_reliable(
-            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Director).build(),
-            &message,
-        );
     }
 
     async fn on_server_connected(
@@ -271,17 +269,19 @@ impl BrokerClient {
     ) {
         println!("[Orchestrator] On new client connected");
 
-        let new_entity_pos = Vec2::new(
-            rand::random_range(0.0..self.chunk_size),
-            rand::random_range(0.0..self.chunk_size),
-        );
+        let half_size = self.world_size / 2.0;
+
+        let new_entity_pos = shard_manager.get_random_spawn_point().unwrap_or(Vec2::new(
+            random_range(-half_size..half_size),
+            random_range(-half_size..half_size),
+        ));
 
         println!(
             "🔑 [Auth] Requête de connexion du client {} (pseudo: {})",
             client_id, msg.pseudo
         );
 
-        let con_ok = true; // AUTHENTIFICATION ICI !
+        let con_ok = true;
 
         if !con_ok {
             println!(
@@ -313,7 +313,6 @@ impl BrokerClient {
                 .append_id(dgs)
                 .build();
 
-            // B) Dire au server de faire spawn :
             let msg = SpawnClientMsg {
                 client_id,
                 pseudo: msg.pseudo.to_string(),
@@ -336,7 +335,7 @@ impl BrokerClient {
         }
     }
 
-    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn assign_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
         println!("Assign areas {:?} to DGS {}", areas, dgs_id);
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
@@ -349,7 +348,7 @@ impl BrokerClient {
         self.broker_api.publish_reliable(topic, &chunk_hand_off);
     }
 
-    pub fn remove_shard_to_dgs(&self, dgs_id: NodeId, mut areas: Vec<(Rect, Option<NodeId>)>) {
+    pub fn _remove_shard_to_dgs(&self, dgs_id: NodeId, areas: Vec<(Rect, Option<NodeId>)>) {
         let topic = TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::NodeLine)
             .append_id(dgs_id)
             .build();

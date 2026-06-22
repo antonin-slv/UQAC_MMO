@@ -124,7 +124,7 @@ pub struct GamePeer {
     event_rx: Option<mpsc::UnboundedReceiver<GameNetworkEvent>>,
     thread_handle: Option<thread::JoinHandle<()>>,
     // We track stream IDs here since the backend doesn't return them usually
-    next_stream_id: u16,
+    _next_stream_id: u16,
 }
 
 #[derive(Clone)]
@@ -181,7 +181,7 @@ impl GamePeer {
             cmd_tx: Some(cmd_tx),
             event_rx: Some(event_rx),
             thread_handle: Some(handle),
-            next_stream_id: 0,
+            _next_stream_id: 0,
         }
     }
 
@@ -201,7 +201,7 @@ impl GamePeer {
     }
 
     pub fn create_stream(&mut self, conn: GameConnection, reliability: GameStreamReliability, stream_id: u16) -> Result<(), GameSocketError> {
-        //self.next_stream_id += 1;
+        //self._next_stream_id += 1;
         self.send_cmd(BackendCommand::CreateStream {
             connection: conn.connection_uuid,
             stream: stream_id, //modifs

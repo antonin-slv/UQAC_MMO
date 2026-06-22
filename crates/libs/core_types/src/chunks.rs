@@ -2,7 +2,7 @@
 use bitcode::{Decode, Encode};
 use std::vec;
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Hash, Copy)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Hash, Copy, Encode, Decode)]
 pub struct GameChunk {
     pub x: i16,
     pub y: i16,

@@ -2360,6 +2360,7 @@ version = "0.1.0"
 dependencies = [
  "bitcode",
  "rustc-hash 2.1.2",
+ "serde",
 ]
 
 [[package]]
@@ -4561,18 +4562,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mock_spatial_auth_server"
-version = "0.1.0"
-dependencies = [
- "broker_client",
- "broker_protocol",
- "core_types",
- "dotenv",
- "game_message",
- "tokio",
 ]
 
 [[package]]

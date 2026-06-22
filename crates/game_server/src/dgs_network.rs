@@ -1,18 +1,21 @@
 // server/src/network.rs
 
 use crate::events;
-use crate::events::{AssignedChunks, ChunkTransferEvent, EntityTransferEvent, SnapshotReceived};
-use crate::game::ClientDirectory;
+use crate::events::{
+    AssignedChunks, EntityTransferEvent, InwardChunkTransferEvent, SnapshotReceived,
+};
 use bevy::prelude::*;
 use broker_client::{ClientNetworkEvent, MmoNetworkClient};
 use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topics::{Namespace, SecurityDomain, TopicBuilder};
+use core_types::chunks::GameChunk;
+use core_types::helpers::FastSet;
 use events::{ChunkHandOffMessage, PlayerConnected, PlayerDisconnected, PlayerInputEvent};
 use game_message::msg_client_server::*;
 use game_message::msg_dgs::{
-    ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, HeartbeatMessage, SpawnClientMsg,
+    ChunkDataHandOff, ChunkHandOff, EntityHandOff, Heartbeat, SpawnClientMsg,
 };
-use game_message::msg_entities::{NetworkEntityId};
+use game_message::msg_entities::NetworkEntityId;
 use game_message::msg_servers::{ServerHelloMSG, ServerType};
 use game_message::{GameMessageHeaders, GamePayload};
 use std::env;
@@ -52,17 +55,15 @@ impl Default for NetworkIdGenerator {
 pub struct ServerStats {
     total_players: usize,
     max_players: usize,
-    external_url: String,
-    external_port: u16,
-    zone: String,
     uuid: uuid::Uuid,
     server_broker_id: u32,
+    pub is_in_use: bool,
 }
 
 #[derive(Resource)]
 pub struct BrockerManager {
     pub client: MmoNetworkClient,
-    pub not_found_count : u8
+    pub not_found_count: u8,
 }
 #[derive(Resource)]
 pub struct HeartBeatTimer {
@@ -170,13 +171,11 @@ impl Plugin for NetworkPlugin {
                 timer: Timer::from_seconds(heartbeat_interval as f32, TimerMode::Repeating),
             })
             .insert_resource(ServerStats {
-                zone: "default".to_string(),
                 total_players: 0,
                 max_players,
-                external_url: listen_ip.to_string(),
-                external_port: listen_port,
                 uuid: server_uuid,
                 server_broker_id: 0, // Initialisé à 0, sera mis à jour après le handshake
+                is_in_use: false,
             });
 
         app.add_message::<PlayerConnected>()
@@ -191,32 +190,37 @@ impl Plugin for NetworkPlugin {
         println!("\n[Server] Network plugin initialized.\n");
     }
 }
+pub fn send_heartbeat(
+    server_info: &ServerStats,
+    broker: &MmoNetworkClient,
+    _managed_chunks: &FastSet<GameChunk>,
+) {
+    let heartbeat = Heartbeat {
+        id: server_info.uuid.to_string(),
+        node_id: broker.node_id.unwrap_or(0),
+        chunk_managed: Default::default(),
+        is_in_use: server_info.is_in_use,
+    };
 
+    let topic_heartbeat =
+        TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
+    broker.publish_reliable(topic_heartbeat, &heartbeat);
+}
 fn send_heartbeat_system(
     time: Res<Time>,
     broker: ResMut<BrockerManager>,
     mut timer: ResMut<HeartBeatTimer>,
     server_info: Res<ServerStats>,
-    client_directory: ResMut<ClientDirectory>,
     managed_chunks: Res<AssignedChunks>,
 ) {
     timer.timer.tick(time.delta());
 
     if timer.timer.just_finished() {
-        let heartbeat = Heartbeat {
-            id: server_info.uuid.to_string(),
-            node_id: broker.client.node_id.unwrap_or(0),
-            zone: server_info.zone.clone(),
-            player_count: client_directory.sessions.len()
-                + (managed_chunks.assigned_chunks.len() > 0) as usize,
-            max_players: server_info.max_players,
-        };
-
-        let heartbeat = HeartbeatMessage { heartbeat };
-
-        let topic_heartbeat =
-            TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::Heartbeat).build();
-        broker.client.publish_reliable(topic_heartbeat, &heartbeat);
+        send_heartbeat(
+            server_info.as_ref(),
+            &broker.as_ref().client,
+            &managed_chunks.as_ref().assigned_chunks,
+        );
     }
 }
 
@@ -228,7 +232,7 @@ fn network_bridge_system(
     mut msg_disconnected: MessageWriter<PlayerDisconnected>,
     mut msg_input: MessageWriter<PlayerInputEvent>,
     mut msg_chunk_assigned: MessageWriter<ChunkHandOffMessage>,
-    mut msg_state_transfer: MessageWriter<ChunkTransferEvent>,
+    mut msg_state_transfer: MessageWriter<InwardChunkTransferEvent>,
     mut msg_entity_transfer: MessageWriter<EntityTransferEvent>,
     mut msg_snapshot: MessageWriter<SnapshotReceived>,
 ) {
@@ -265,6 +269,8 @@ fn network_bridge_system(
                 let client_auth_topic =
                     TopicBuilder::new(SecurityDomain::PrivateRW, Namespace::ClientAuth).build();
                 broker_connect.subscribe(client_auth_topic, 0);
+
+                send_heartbeat(server_info.as_ref(), broker_connect, &FastSet::default());
             }
             ClientNetworkEvent::Connected => {
                 println!("[Server] Connecté au Broker (Still not ready)...");
@@ -311,7 +317,7 @@ fn route_message_events(
     msg_input: &mut MessageWriter<PlayerInputEvent>,
     msg_connected: &mut MessageWriter<PlayerConnected>,
     msg_chunk_assigned: &mut MessageWriter<ChunkHandOffMessage>,
-    msg_chunk_state_transfer: &mut MessageWriter<ChunkTransferEvent>,
+    msg_chunk_state_transfer: &mut MessageWriter<InwardChunkTransferEvent>,
     msg_entity_transfer: &mut MessageWriter<EntityTransferEvent>,
     msg_snapshot: &mut MessageWriter<SnapshotReceived>,
 ) {
@@ -358,7 +364,7 @@ fn route_message_events(
 
         GameMessageHeaders::ChunkDataHandOff => match payload.extract::<ChunkDataHandOff>() {
             Ok(msg) => {
-                msg_chunk_state_transfer.write(ChunkTransferEvent { message: msg });
+                msg_chunk_state_transfer.write(InwardChunkTransferEvent { message: msg });
             }
             Err(e) => {
                 println!("[Server] Parsing Error EntityStateTransferHandoff : {}", e);

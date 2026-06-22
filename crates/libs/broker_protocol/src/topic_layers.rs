@@ -226,6 +226,17 @@ pub trait IntoTopicLayer {
     fn into_layer(self) -> TopicLayer;
 }
 
+impl IntoTopicLayer for u8 {
+    fn into_layer(self) -> TopicLayer {
+        TopicLayer::Fixed(vec![self])
+    }
+}
+impl IntoTopicLayer for Vec<u8> {
+    fn into_layer(self) -> TopicLayer {
+        TopicLayer::ListU8(self)
+    }
+}
+
 impl IntoTopicLayer for std::ops::RangeInclusive<u8> {
     fn into_layer(self) -> TopicLayer {
         TopicLayer::RangeU8(*self.start(), *self.end())
