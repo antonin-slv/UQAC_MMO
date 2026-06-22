@@ -1,6 +1,6 @@
 ﻿use bytes::{Buf, BufMut, Bytes, BytesMut};
-use broker::broker_core::Broker;
-use broker::broker_impl::Broker2;
+use broker::old_broker::Broker as OldBroker;
+use broker::broker::Broker;
 use crate::broker_hard_copy::test_batch::*;
 use crate::broker_hard_copy::test_broker_base::*;
 use game_message::{GameMessage, GameMessageHeaders, NetRead, NetWrite, NetWriteTo};
@@ -11,7 +11,7 @@ fn test_legacy_broker_parity() {
     let priv_port = 8101;
 
     let lambda = move || {
-        let mut broker = Broker::new(pub_port, priv_port);
+        let mut broker = OldBroker::new(pub_port, priv_port);
         broker.run(false); // Boucle bloquante mono-thread
     };
     run_broker_validation_suite(pub_port, priv_port, lambda);
@@ -23,7 +23,7 @@ fn test_broker_batch() {
     let priv_port = 8103;
 
     let lambda = move || {
-        let mut broker = Broker::new(pub_port, priv_port);
+        let mut broker = OldBroker::new(pub_port, priv_port);
         broker.run(false); // Boucle bloquante mono-thread
     };
     run_broker_batch_suite(pub_port, priv_port, lambda);
@@ -35,7 +35,7 @@ fn benchmark_legacy_broker() {
     let pub_port = 8104;
     let priv_port = 8105;
     let lambda = move || {
-        let mut broker = Broker::new(pub_port, priv_port);
+        let mut broker = OldBroker::new(pub_port, priv_port);
         broker.run(false); // Boucle bloquante mono-thread
     };
     run_distributed_stress_test(pub_port, priv_port, lambda, 10, 100, 500, 8);
@@ -46,7 +46,7 @@ fn test_async_broker2_parity() {
     let priv_port = 8201;
 
     let lambda = move || {
-        let mut broker2 = Broker2::new(pub_port, priv_port);
+        let mut broker2 = Broker::new(pub_port, priv_port);
         broker2.run(false); // Boucle avec workers asynchrones
     };
     run_broker_validation_suite(pub_port, priv_port, lambda);
@@ -57,7 +57,7 @@ fn test_broker2_batch() {
     let priv_port = 8203;
 
     let lambda = move || {
-        let mut broker2 = Broker2::new(pub_port, priv_port);
+        let mut broker2 = Broker::new(pub_port, priv_port);
         broker2.run(false); // Boucle avec workers asynchrones
     };
     run_broker_batch_suite(pub_port, priv_port, lambda);
@@ -70,7 +70,7 @@ fn benchmark_async_broker2() {
     let pub_port = 8204;
     let priv_port = 8205;
     let lambda = move || {
-        let mut broker2 = Broker2::new(pub_port, priv_port);
+        let mut broker2 = Broker::new(pub_port, priv_port);
         broker2.run(false); // Boucle avec workers asynchrones
     };
     run_distributed_stress_test(pub_port, priv_port, lambda, 10, 100, 500, 8);

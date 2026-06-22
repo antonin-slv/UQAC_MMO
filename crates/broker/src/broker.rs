@@ -9,11 +9,11 @@ use uuid::Uuid;
 use game_sockets::protocols::QuicBackend;
 
 
-pub struct Broker2 {
+pub struct Broker {
     public_peer: GamePeer,
     private_peer: GamePeer,
 }
-impl Broker2 {
+impl Broker {
     pub fn new(public_port : u16, private_port : u16) -> Self {
         let public_peer = GamePeer::new(QuicBackend::new());
         let private_peer = GamePeer::new(QuicBackend::new());
@@ -30,7 +30,7 @@ impl Broker2 {
             public_port, private_port
         );
 
-        Broker2 {
+        Broker {
             public_peer,
             private_peer,
         }
@@ -96,10 +96,10 @@ impl Broker2 {
             let event = ingress.event;
             match ingress.interface {
                 NetworkInterface::Private => {
-                    Broker2::handle_private_event(event, &state, &public_tx, &private_tx)
+                    Broker::handle_private_event(event, &state, &public_tx, &private_tx)
                 }
                 NetworkInterface::Public => {
-                    Broker2::handle_public_event(event, &state, &public_tx, &private_tx)
+                    Broker::handle_public_event(event, &state, &public_tx, &private_tx)
                 }
             }
         }

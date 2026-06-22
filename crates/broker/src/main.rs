@@ -1,8 +1,7 @@
+use crate::broker::Broker;
 use std::env;
-use crate::broker_impl::Broker2;
 
-mod broker_core;
-mod broker_impl;
+mod broker;
 mod broker_state;
 
 const CLIENT_LISTEN_PORT_ENV_NAME: &str = "BROKER_PUBLIC_PORT";
@@ -17,7 +16,7 @@ fn main() {
         .unwrap_or_else(|_| "8001".into())
         .parse()
         .unwrap_or(8001);
-    let mut broker = Broker2::new(public_port, private_port);
+    let mut broker = Broker::new(public_port, private_port);
 
     broker.run(true);
 }

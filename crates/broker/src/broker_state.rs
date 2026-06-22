@@ -1,13 +1,14 @@
-﻿use crate::broker_core::FastIterableSet;
-use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
+﻿use broker_protocol::broker_message::{NodeId, NodeIdMetaData};
 use broker_protocol::topics::Topic;
 use dashmap::{DashMap, DashSet};
 use game_sockets::{GameConnection, GameNetworkEvent};
-use std::sync::atomic::{AtomicU32, Ordering};
+use indexmap::IndexSet;
 use rustc_hash::FxBuildHasher;
+use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
 pub type FastDashMap<K, V> = DashMap<K, V, FxBuildHasher>;
+pub type FastIterableSet<K> = IndexSet<K>;
 
 
 pub enum NetworkInterface {
